@@ -26,18 +26,17 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-    
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
         root-reserve-mb: 512
         swap-size-mb: 1024
         remove-dotnet: 'true'
-
+        
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     
     - name: Build Milvus in Docker
       run: |
