@@ -1,0 +1,159 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - xinyi-testing-release
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: 'Release name (e.g., v2.3.0-rc1)'
+        required: false
+        type: string
+      tag_name:
+        description: 'Git tag name (e.g., v2.3.0-rc1)'
+        required: false
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build-and-release:
+    name: Build Milvus and Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    
+    - name: Free up disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        df -h
+    
+    - name: Build Milvus in Docker
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -w /workspace \
+          milvusdb/milvus-env:ubuntu20.04-latest \
+          bash -c "make install"
+    
+    - name: Verify build output
+      run: |
+        echo "Contents of bin directory:"
+        ls -lah bin/
+        echo "Contents of lib directory:"
+        ls -lah lib/
+    
+    - name: Set release variables
+      id: vars
+      run: |
+        # Get version info
+        BUILD_TAG=$(git describe --tags --always --dirty="-dev")
+        BUILD_TIME=$(date -u +"%Y%m%d-%H%M%S")
+        GIT_COMMIT=$(git rev-parse --short HEAD)
+        
+        # Set tag and release name (use inputs if available, otherwise generate)
+        if [ -n "${{ inputs.tag_name }}" ]; then
+          TAG_NAME="${{ inputs.tag_name }}"
+          RELEASE_NAME="${{ inputs.release_name }}"
+        else
+          TAG_NAME="test-${BUILD_TAG}-${BUILD_TIME}"
+          RELEASE_NAME="Milvus Test Build ${BUILD_TAG}"
+        fi
+        
+        echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+        echo "release_name=${RELEASE_NAME}" >> $GITHUB_OUTPUT
+        echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
+        echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+        echo "git_commit=${GIT_COMMIT}" >> $GITHUB_OUTPUT
+    
+    - name: Create release package
+      run: |
+        # Create version info file
+        cat > VERSION.txt << EOF
+        Milvus Release Package
+        =====================
+        Build Tag: ${{ steps.vars.outputs.build_tag }}
+        Build Time: ${{ steps.vars.outputs.build_time }}
+        Git Commit: ${{ steps.vars.outputs.git_commit }}
+        Platform: ubuntu20.04
+        EOF
+        
+        # Copy version info to bin directory
+        cp VERSION.txt bin/
+        
+        # Create zip archive
+        ARCHIVE_NAME="milvus-${{ steps.vars.outputs.tag_name }}-ubuntu20.04-x86_64.tar.gz"
+        tar -czf ${ARCHIVE_NAME} bin/ lib/ configs/
+        
+        echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+        
+        # Display archive info
+        ls -lh ${ARCHIVE_NAME}
+        tar -tzf ${ARCHIVE_NAME} | head -20
+    
+    - name: Generate release notes
+      run: |
+        cat > RELEASE_NOTES.md << 'EOF'
+        ## Milvus Binary Release
+        
+        This release contains the Milvus binary and required libraries built for Ubuntu 20.04 (x86_64).
+        
+        ### Package Contents
+        - `bin/milvus` - Main Milvus executable
+        - `lib/` - Required shared libraries
+        - `configs/` - Default configuration files
+        
+        ### Installation
+        ```bash
+        # Extract the archive
+        tar -xzf ${{ env.ARCHIVE_NAME }}
+        
+        # Add libraries to LD_LIBRARY_PATH
+        export LD_LIBRARY_PATH=$(pwd)/lib:$LD_LIBRARY_PATH
+        
+        # Run Milvus
+        ./bin/milvus run standalone
+        ```
+        
+        ### System Requirements
+        - Ubuntu 20.04 or compatible Linux distribution
+        - x86_64 architecture
+        - glibc 2.31 or later
+        
+        ### Build Information
+        - Docker Image: `milvusdb/milvus-env:ubuntu20.04-latest`
+        - Commit: `${{ github.sha }}`
+        - Build Time: `$(date -u)`
+        
+        EOF
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: ${{ steps.vars.outputs.release_name }}
+        tag_name: ${{ steps.vars.outputs.tag_name }}
+        body_path: RELEASE_NOTES.md
+        files: ${{ env.ARCHIVE_NAME }}
+        draft: false
+        prerelease: ${{ inputs.prerelease || true }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: milvus-binary-package
+        path: ${{ env.ARCHIVE_NAME }}
+        retention-days: 30
+
