@@ -146,7 +146,8 @@ func newRerankOutputs(inputs *rerankInputs, searchParams *SearchParams) *rerankO
 		Ids:        &schemapb.IDs{},
 		Topks:      []int64{},
 	}
-	if len(inputs.fieldData) > 0 {
+	// Only prepare field data if this reranker actually needs input fields
+	if len(inputs.fieldData) > 0 && len(inputs.inputFieldIds) > 0 && len(inputs.fieldData[0].GetFieldsData()) > 0 {
 		ret.FieldsData = typeutil.PrepareResultFieldData(inputs.fieldData[0].GetFieldsData(), searchParams.limit)
 	}
 	return &rerankOutputs{ret}
