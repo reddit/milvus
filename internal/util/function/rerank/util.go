@@ -146,9 +146,11 @@ func newRerankOutputs(inputs *rerankInputs, searchParams *SearchParams) *rerankO
 		Ids:        &schemapb.IDs{},
 		Topks:      []int64{},
 	}
-	// Only prepare field data if this reranker actually needs input fields
-	if len(inputs.fieldData) > 0 && len(inputs.inputFieldIds) > 0 && len(inputs.fieldData[0].GetFieldsData()) > 0 {
-		ret.FieldsData = typeutil.PrepareResultFieldData(inputs.fieldData[0].GetFieldsData(), searchParams.limit)
+	if len(inputs.fieldData) > 0 && len(inputs.inputFieldIds) > 0 {
+		firstResult := inputs.fieldData[0]
+		if firstResult != nil && len(firstResult.GetFieldsData()) > 0 && typeutil.GetSizeOfIDs(firstResult.GetIds()) > 0 {
+			ret.FieldsData = typeutil.PrepareResultFieldData(firstResult.GetFieldsData(), searchParams.limit)
+		}
 	}
 	return &rerankOutputs{ret}
 }
@@ -158,7 +160,7 @@ func appendResult[T PKType](inputs *rerankInputs, outputs *rerankOutputs, idScor
 	scores := idScores.scores
 	outputs.searchResultData.Topks = append(outputs.searchResultData.Topks, int64(len(ids)))
 	outputs.searchResultData.Scores = append(outputs.searchResultData.Scores, scores...)
-	if len(inputs.fieldData) > 0 {
+	if len(inputs.fieldData) > 0 && len(inputs.inputFieldIds) > 0 && len(outputs.searchResultData.FieldsData) > 0 {
 		for idx := range ids {
 			loc := idScores.locations[idx]
 			typeutil.AppendFieldData(outputs.searchResultData.FieldsData, inputs.fieldData[loc.batchIdx].GetFieldsData(), int64(loc.offset))
