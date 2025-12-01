@@ -917,6 +917,184 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 	})
 }
 
+func (suite *SegmentLoaderSuite) TestLoadLazySegmentWithDeltaLogs() {
+	ctx := context.Background()
+	segmentID := suite.segmentID + 1000
+
+	// Create segment with lazy load enabled
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		NumOfRows:     100,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	// Create delta logs
+	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+	loadInfo.Deltalogs = deltaLogs
+
+	// Create the segment with lazy load enabled
+	segment, err := NewSegment(ctx, suite.manager.Collection.Get(suite.collectionID),
+		suite.manager.Segment, SegmentTypeSealed, 0, loadInfo)
+	suite.NoError(err)
+	suite.True(segment.IsLazyLoad())
+
+	// Initially, segment should not have delta logs applied (row count should be 100, not 98)
+	suite.Equal(int64(100), segment.RowNum())
+
+	// Now call LoadLazySegment - this should load both segment data AND delta logs
+	err = suite.loader.LoadLazySegment(ctx, segment, loadInfo)
+	suite.NoError(err)
+
+	// After LoadLazySegment, delta logs should be applied (row count should be 98)
+	suite.Equal(int64(98), segment.RowNum()) // 100 - 2 deleted records
+
+	// Verify that deleted PKs are not present
+	for pk := 0; pk < 100; pk++ {
+		lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
+		exist := segment.MayPkExist(lc)
+		if pk == 1 || pk == 2 {
+			suite.False(exist, "PK %d should be deleted", pk)
+		} else {
+			suite.True(exist, "PK %d should exist", pk)
+		}
+	}
+}
+
+func (suite *SegmentLoaderSuite) TestLoadLazySegmentSkipsDeltaLogsInitially() {
+	ctx := context.Background()
+	segmentID := suite.segmentID + 2000
+
+	// Create binlogs and delta logs
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		100,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		Deltalogs:     deltaLogs,
+		NumOfRows:     int64(100),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	// Enable lazy load for this collection
+	collection := suite.manager.Collection.Get(suite.collectionID)
+	originalSchema := collection.Schema()
+	defer func() {
+		// Reset schema after test
+		suite.manager.Collection.PutOrRef(suite.collectionID, originalSchema,
+			mock_segcore.GenTestIndexMeta(suite.collectionID, originalSchema), nil)
+	}()
+
+	// Create new schema with lazy load enabled
+	newSchema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
+	newSchema.Properties = append(newSchema.Properties, &commonpb.KeyValuePair{
+		Key:   "collection.loadType",
+		Value: "lazy",
+	})
+
+	suite.manager.Collection.PutOrRef(suite.collectionID, newSchema,
+		mock_segcore.GenTestIndexMeta(suite.collectionID, newSchema), nil)
+
+	// Load the segment - this should skip delta logs for lazy load segments
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.NoError(err)
+	suite.Len(segments, 1)
+
+	segment := segments[0]
+	suite.True(segment.IsLazyLoad())
+
+	// For lazy load segments, delta logs should NOT be applied during initial load
+	// Row count should still be 100 (not 98)
+	suite.Equal(int64(100), segment.RowNum())
+
+	// Now call LoadLazySegment - this should load delta logs
+	err = suite.loader.LoadLazySegment(ctx, segment, loadInfo)
+	suite.NoError(err)
+
+	// After LoadLazySegment, delta logs should be applied
+	suite.Equal(int64(98), segment.RowNum()) // 100 - 2 deleted records
+}
+
+func (suite *SegmentLoaderSuite) TestLoadNonLazySegmentLoadsDeltaLogs() {
+	ctx := context.Background()
+	segmentID := suite.segmentID + 3000
+
+	// Create binlogs and delta logs
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		100,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		Deltalogs:     deltaLogs,
+		NumOfRows:     int64(100),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	// Load the segment - for non-lazy segments, delta logs should be loaded during initial Load
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.NoError(err)
+	suite.Len(segments, 1)
+
+	segment := segments[0]
+	suite.False(segment.IsLazyLoad())
+
+	// For non-lazy segments, delta logs should be applied during initial load
+	suite.Equal(int64(98), segment.RowNum()) // 100 - 2 deleted records
+
+	// Verify that deleted PKs are not present
+	for pk := 0; pk < 100; pk++ {
+		lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
+		exist := segment.MayPkExist(lc)
+		if pk == 1 || pk == 2 {
+			suite.False(exist, "PK %d should be deleted", pk)
+		} else {
+			suite.True(exist, "PK %d should exist", pk)
+		}
+	}
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})

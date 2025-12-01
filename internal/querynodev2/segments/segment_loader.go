@@ -358,8 +358,13 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				}
 			}
 		}
-		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
-			return errors.Wrap(err, "At LoadDeltaLogs")
+		// For lazy load segments, delta logs need to be deferred until the segment data is loaded,
+		// because delta log loading requires the primary key column to be available.
+		// Delta logs will be loaded when the segment is first accessed via LoadLazySegment.
+		if !segment.IsLazyLoad() {
+			if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
+				return errors.Wrap(err, "At LoadDeltaLogs")
+			}
 		}
 
 		if !segment.BloomFilterExist() {
@@ -1073,7 +1078,17 @@ func (loader *segmentLoader) LoadLazySegment(ctx context.Context,
 	// NOTE: logical resource is not used for lazy load, so set it to zero
 	defer loader.freeRequestResource(result)
 
-	return loader.LoadSegment(ctx, segment, loadInfo)
+	if err = loader.LoadSegment(ctx, segment, loadInfo); err != nil {
+		return err
+	}
+
+	// Load delta logs after segment data is loaded, because delta log loading
+	// requires the primary key column to be available for sorted-by-pk segments.
+	if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
+		return errors.Wrap(err, "At LoadDeltaLogs")
+	}
+
+	return nil
 }
 
 // requestResourceWithTimeout requests memory & storage to load segments with a timeout and retry.
