@@ -21,6 +21,7 @@ package rerank
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -434,6 +435,123 @@ func (s *FunctionScoreSuite) TestFunctionUtil() {
 	g1.idList = []int64{}
 	_, err = groupScore(g1, avgScorer)
 	s.ErrorContains(err, "input group for score must have at least one id, must be sth wrong within code")
+}
+
+func TestCreateFunction(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 103, Name: "score_field", DataType: schemapb.DataType_Float},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		funcSchema  *schemapb.FunctionSchema
+		expectError bool
+		errContains string
+	}{
+		{
+			name: "expr reranker - success",
+			funcSchema: &schemapb.FunctionSchema{
+				Name:            "expr_test",
+				Type:            schemapb.FunctionType_Rerank,
+				InputFieldNames: []string{"ts"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: reranker, Value: ExprName},
+					{Key: ExprCodeKey, Value: "score * 2"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "expr reranker - missing expr_code",
+			funcSchema: &schemapb.FunctionSchema{
+				Name:            "expr_test",
+				Type:            schemapb.FunctionType_Rerank,
+				InputFieldNames: []string{"ts"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: reranker, Value: ExprName},
+				},
+			},
+			expectError: true,
+			errContains: "expr rerank requires",
+		},
+		{
+			name: "wasm reranker - missing wasm_code",
+			funcSchema: &schemapb.FunctionSchema{
+				Name:            "wasm_test",
+				Type:            schemapb.FunctionType_Rerank,
+				InputFieldNames: []string{"ts"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: reranker, Value: WasmName},
+				},
+			},
+			expectError: true,
+			errContains: "WASM bytecode not provided in params",
+		},
+		{
+			name: "unsupported reranker",
+			funcSchema: &schemapb.FunctionSchema{
+				Name: "unknown_test",
+				Type: schemapb.FunctionType_Rerank,
+				Params: []*commonpb.KeyValuePair{
+					{Key: reranker, Value: "unknown_reranker"},
+				},
+			},
+			expectError: true,
+			errContains: "Unsupported rerank function",
+		},
+		{
+			name: "non-rerank function type",
+			funcSchema: &schemapb.FunctionSchema{
+				Name: "bm25_test",
+				Type: schemapb.FunctionType_BM25,
+				Params: []*commonpb.KeyValuePair{
+					{Key: reranker, Value: ExprName},
+				},
+			},
+			expectError: true,
+			errContains: "is not rerank function",
+		},
+		{
+			name: "rerank with output fields",
+			funcSchema: &schemapb.FunctionSchema{
+				Name:             "output_test",
+				Type:             schemapb.FunctionType_Rerank,
+				OutputFieldNames: []string{"text"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: reranker, Value: ExprName},
+				},
+			},
+			expectError: true,
+			errContains: "should not have output field",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reranker, err := createFunction(schema, tc.funcSchema)
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.errContains)
+				}
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("expected error containing %q, got %q", tc.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if reranker == nil {
+					t.Fatal("expected non-nil reranker")
+				}
+			}
+		})
+	}
 }
 
 func TestIsQueryNodeRanker(t *testing.T) {

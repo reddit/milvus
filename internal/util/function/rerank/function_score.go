@@ -162,10 +162,14 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema)
 	case WeightedName:
 		rerankFunc, newRerankErr = newWeightedFunction(collSchema, funcSchema)
+	case ExprName:
+		rerankFunc, newRerankErr = newExprFunction(collSchema, funcSchema)
+	case WasmName:
+		rerankFunc, newRerankErr = newWasmFunction(collSchema, funcSchema)
 	case BoostName:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, DecayFunctionName, ModelFunctionName, RRFName, WeightedName)
+		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s,%s,%s]", rerankerName, DecayFunctionName, ModelFunctionName, RRFName, WeightedName, ExprName, WasmName)
 	}
 
 	if newRerankErr != nil {
