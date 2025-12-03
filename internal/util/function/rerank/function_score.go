@@ -169,7 +169,7 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	case BoostName:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s,%s]", rerankerName, DecayFunctionName, ModelFunctionName, RRFName, WeightedName, ExprName)
+		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s,%s,%s]", rerankerName, DecayFunctionName, ModelFunctionName, RRFName, WeightedName, ExprName, WasmName)
 	}
 
 	if newRerankErr != nil {
