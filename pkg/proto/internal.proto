@@ -136,6 +136,16 @@ message SearchRequest {
   uint64 collection_ttl_timestamps = 30;
   // reranker function at QueryNode
   schema.FunctionSchema rerank_function = 31;
+  // multi-field BM25 combined search (optional, guarded by bm25_multi_field=true)
+  bool bm25_multi_field = 32;
+  // field ids involved in combined BM25
+  repeated int64 bm25_field_ids = 33;
+  // per-field raw query strings (aligned to bm25_field_ids)
+  repeated string bm25_queries = 34;
+  // per-field weights (aligned); default to 1.0 if not provided
+  repeated float bm25_weights = 35;
+  // aggregation mode: "weighted_sum" (default) or "max"
+  string bm25_agg = 36;
 }
 
 message SubSearchResults {

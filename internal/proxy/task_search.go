@@ -461,17 +461,13 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	var err error
 
-	// Parse multi-field BM25 toggle and options (stage 1 guard: not yet wired end-to-end).
+	// Parse multi-field BM25 toggle and options.
 	if enabled, agg, weights, perr := parseBm25MultiFieldParams(t.request.GetSearchParams()); perr != nil {
 		return perr
 	} else if enabled {
 		t.bm25MultiEnabled = true
 		t.bm25AggMode = agg
 		t.bm25Weights = weights
-		if len(t.request.GetSubReqs()) > 1 {
-			// Guard to avoid double-application / incorrect results until native path is wired.
-			return errors.New("bm25_multi_field is not yet supported in this build (multiple sub-requests detected)")
-		}
 	}
 	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
@@ -583,6 +579,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
+	rawQueries := make([]string, 0, len(t.request.GetSubReqs()))
 	for index, subReq := range t.request.GetSubReqs() {
 		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
@@ -620,6 +617,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
 		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
+		rawQueries = append(rawQueries, subReq.GetDsl())
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
 			// isolation has tighter constraint, check first
@@ -677,6 +675,23 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
+	}
+
+	// Populate combined BM25 metadata for downstream consumption.
+	if t.bm25MultiEnabled {
+		if len(t.bm25Weights) == 0 {
+			t.bm25Weights = make([]float32, len(queryFieldIDs))
+			for i := range t.bm25Weights {
+				t.bm25Weights[i] = 1.0
+			}
+		} else if len(t.bm25Weights) != len(queryFieldIDs) {
+			return fmt.Errorf("bm25_weights length %d does not match sub requests %d", len(t.bm25Weights), len(queryFieldIDs))
+		}
+		t.SearchRequest.Bm25MultiField = true
+		t.SearchRequest.Bm25Agg = t.bm25AggMode
+		t.SearchRequest.Bm25FieldIds = queryFieldIDs
+		t.SearchRequest.Bm25Queries = rawQueries
+		t.SearchRequest.Bm25Weights = t.bm25Weights
 	}
 
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
