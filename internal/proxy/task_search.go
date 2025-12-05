@@ -55,6 +55,13 @@ const (
 	rangeFilterKey   = "range_filter"
 )
 
+// bm25MultiFieldParam keys.
+const (
+	paramBM25MultiField = "bm25_multi_field"
+	paramBM25Agg        = "bm25_agg"
+	paramBM25Weights    = "bm25_weights"
+)
+
 // type requery func(span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error)
 
 type searchTask struct {
@@ -100,6 +107,10 @@ type searchTask struct {
 	resolvedTimezoneStr string
 
 	isIterator bool
+	// Multi-field BM25 options (parsed but not yet executed).
+	bm25MultiEnabled bool
+	bm25AggMode      string
+	bm25Weights      []float32
 	// we always remove pk field from output fields, as search result already contains pk field.
 	// if the user explicitly set pk field in output fields, we add it back to the result.
 	userRequestedPkFieldExplicitly bool
@@ -387,12 +398,81 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 	return nil
 }
 
+// parseBm25MultiFieldParams inspects search params for bm25_multi_field toggle and options.
+// It returns enabled flag, aggregation mode (default "weighted_sum"), parsed weights, or error.
+func parseBm25MultiFieldParams(params []*commonpb.KeyValuePair) (bool, string, []float32, error) {
+	enabled := false
+	agg := "weighted_sum"
+	var weights []float32
+
+	// helper to fetch param by key (case-insensitive)
+	getParam := func(key string) (string, bool) {
+		for _, kv := range params {
+			if strings.EqualFold(kv.Key, key) {
+				return kv.Value, true
+			}
+		}
+		return "", false
+	}
+
+	if val, ok := getParam(paramBM25MultiField); ok {
+		parsed, err := strconv.ParseBool(val)
+		if err != nil {
+			return false, "", nil, fmt.Errorf("invalid %s: %v", paramBM25MultiField, err)
+		}
+		enabled = parsed
+	}
+	if !enabled {
+		return false, agg, weights, nil
+	}
+
+	if val, ok := getParam(paramBM25Agg); ok && val != "" {
+		lower := strings.ToLower(val)
+		if lower == "weighted_sum" || lower == "max" {
+			agg = lower
+		} else {
+			return false, "", nil, fmt.Errorf("invalid %s: %s (expect weighted_sum or max)", paramBM25Agg, val)
+		}
+	}
+
+	if val, ok := getParam(paramBM25Weights); ok && val != "" {
+		parts := strings.Split(val, ",")
+		weights = make([]float32, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			f, err := strconv.ParseFloat(p, 32)
+			if err != nil {
+				return false, "", nil, fmt.Errorf("invalid weight %q in %s: %v", p, paramBM25Weights, err)
+			}
+			weights = append(weights, float32(f))
+		}
+	}
+
+	return true, agg, weights, nil
+}
+
 func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init advanced search request")
 	defer sp.End()
 	t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	var err error
+
+	// Parse multi-field BM25 toggle and options (stage 1 guard: not yet wired end-to-end).
+	if enabled, agg, weights, perr := parseBm25MultiFieldParams(t.request.GetSearchParams()); perr != nil {
+		return perr
+	} else if enabled {
+		t.bm25MultiEnabled = true
+		t.bm25AggMode = agg
+		t.bm25Weights = weights
+		if len(t.request.GetSubReqs()) > 1 {
+			// Guard to avoid double-application / incorrect results until native path is wired.
+			return errors.New("bm25_multi_field is not yet supported in this build (multiple sub-requests detected)")
+		}
+	}
 	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
 		log.Info("EXPR_RERANK: Creating function score from request",
