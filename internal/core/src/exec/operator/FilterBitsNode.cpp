@@ -59,6 +59,8 @@ PhyFilterBitsNode::IsFinished() {
 
 RowVectorPtr
 PhyFilterBitsNode::GetOutput() {
+    milvus::tracer::AddEvent("filter_bits_node_start");
+    
     if (AllInputProcessed()) {
         return nullptr;
     }
@@ -70,6 +72,8 @@ PhyFilterBitsNode::GetOutput() {
 
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
+    
+    milvus::tracer::AddEvent("filter_bits_before_eval");
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -96,6 +100,8 @@ PhyFilterBitsNode::GetOutput() {
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
+    milvus::tracer::AddEvent("filter_bits_after_eval");
+    
     bitset.flip();
     AssertInfo(bitset.size() == need_process_rows_,
                "bitset size: {}, need_process_rows_: {}",
@@ -109,6 +115,7 @@ PhyFilterBitsNode::GetOutput() {
     std::vector<VectorPtr> col_res;
     col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
                                                      std::move(valid_bitset)));
+    milvus::tracer::AddEvent("filter_bits_node_end");
     std::chrono::high_resolution_clock::time_point scalar_end =
         std::chrono::high_resolution_clock::now();
     double scalar_cost =

@@ -138,6 +138,8 @@ Task::Terminate(TaskState state) {
 
 RowVectorPtr
 Task::Next(ContinueFuture* future) {
+    milvus::tracer::AddEvent("task_next_start");
+
     // NOTE: Task::Next is single-threaded execution
     AssertInfo(plan_fragment_.execution_strategy_ ==
                    plan::ExecutionStrategy::kUngrouped,
@@ -151,24 +153,30 @@ Task::Next(ContinueFuture* future) {
             consumer_supplier_ == nullptr,
             "Single-threaded execution doesn't support delivering results to a "
             "callback");
-
+        milvus::tracer::AddEvent("before_local_planner");
+        
         LocalPlanner::Plan(plan_fragment_,
                            nullptr,
                            &driver_factories_,
                            *query_context_->query_config(),
                            1);
+        milvus::tracer::AddEvent("after_local_planner");
 
+        milvus::tracer::AddEvent("before_driver_factory_loop");
         for (const auto& factory : driver_factories_) {
             assert(factory->SupportSingleThreadExecution());
             num_ungrouped_drivers_ += factory->num_drivers_;
             num_total_drivers_ += factory->num_total_drivers_;
         }
+        milvus::tracer::AddEvent("after_driver_factory_loop");
 
         auto self = shared_from_this();
         std::vector<std::shared_ptr<Driver>> drivers;
 
+        milvus::tracer::AddEvent("before_create_drivers");
         drivers.reserve(num_ungrouped_drivers_);
         CreateDriversLocked(self, kUngroupedGroupId, drivers);
+        milvus::tracer::AddEvent("after_create_drivers");
 
         drivers_ = std::move(drivers);
     }
@@ -177,6 +185,7 @@ Task::Next(ContinueFuture* future) {
 
     std::vector<ContinueFuture> futures;
     futures.resize(num_drivers);
+    milvus::tracer::AddEvent("before_driver_execution_loop");
 
     for (;;) {
         int runnable_drivers = 0;
@@ -232,6 +241,7 @@ Task::Next(ContinueFuture* future) {
             return nullptr;
         }
     }
+    milvus::tracer::AddEvent("after_driver_execution_loop");
 }
 
 }  // namespace exec

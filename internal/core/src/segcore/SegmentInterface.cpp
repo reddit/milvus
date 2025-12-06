@@ -97,14 +97,26 @@ SegmentInternalInterface::Search(
     Timestamp timestamp,
     int32_t consistency_level,
     Timestamp collection_ttl) const {
+    milvus::tracer::AddEvent("segment_search_start");
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
+
+    milvus::tracer::AddEvent("before_check_search");
     check_search(plan);
+    milvus::tracer::AddEvent("after_check_search");
+
+    milvus::tracer::AddEvent("before_create_visitor");
     query::ExecPlanNodeVisitor visitor(
         *this, timestamp, placeholder_group, consistency_level, collection_ttl);
+    milvus::tracer::AddEvent("after_create_visitor");
+
     auto results = std::make_unique<SearchResult>();
+    milvus::tracer::AddEvent("before_visitor_get_result");
     *results = visitor.get_moved_result(*plan->plan_node_);
+    milvus::tracer::AddEvent("after_visitor_get_result");
+
     results->segment_ = (void*)this;
+    milvus::tracer::AddEvent("segment_search_end");
     return results;
 }
 
