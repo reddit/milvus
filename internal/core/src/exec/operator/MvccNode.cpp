@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "MvccNode.h"
+#include "common/Tracer.h"
 
 namespace milvus {
 namespace exec {
@@ -43,6 +44,8 @@ PhyMvccNode::AddInput(RowVectorPtr& input) {
 
 RowVectorPtr
 PhyMvccNode::GetOutput() {
+    milvus::tracer::AddEvent("mvcc_node_start");
+    
     if (is_finished_) {
         return nullptr;
     }
@@ -55,6 +58,8 @@ PhyMvccNode::GetOutput() {
         is_finished_ = true;
         return nullptr;
     }
+    
+    milvus::tracer::AddEvent("mvcc_before_bitmap_creation");
     // the first vector is filtering result and second bitset is a valid bitset
     // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
@@ -63,10 +68,16 @@ PhyMvccNode::GetOutput() {
                                      : GetColumnVector(input_);
 
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
+    
+    milvus::tracer::AddEvent("mvcc_before_mask_timestamps");
     // need to expose null?
     segment_->mask_with_timestamps(
         data, query_timestamp_, collection_ttl_timestamp_);
+    milvus::tracer::AddEvent("mvcc_after_mask_timestamps");
+    
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
+    milvus::tracer::AddEvent("mvcc_after_mask_delete");
+    
     is_finished_ = true;
 
     // input_ have already been updated

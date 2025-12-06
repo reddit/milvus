@@ -122,11 +122,14 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t timestamp,
             int32_t consistency_level,
             uint64_t collection_ttl) {
+    milvus::tracer::AddEvent("async_search_cgo_entry");
+
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
 
+    milvus::tracer::AddEvent("before_future_async");
     auto future = milvus::futures::Future<milvus::SearchResult>::async(
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
@@ -137,27 +140,41 @@ AsyncSearch(CTraceContext c_trace,
          timestamp,
          consistency_level,
          collection_ttl](milvus::futures::CancellationToken cancel_token) {
+            milvus::tracer::AddEvent("async_lambda_start");
+
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
             trace_ctx.spanID = c_trace.spanID;
             trace_ctx.traceFlags = c_trace.traceFlags;
 
+            milvus::tracer::AddEvent("before_span_start");
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
+            milvus::tracer::AddEvent("after_span_start");
 
+            milvus::tracer::AddEvent("before_lazy_check_schema");
             segment->LazyCheckSchema(plan->schema_);
+            milvus::tracer::AddEvent("after_lazy_check_schema");
 
+            milvus::tracer::AddEvent("before_segment_search");
             auto search_result = segment->Search(
                 plan, phg_ptr, timestamp, consistency_level, collection_ttl);
+            milvus::tracer::AddEvent("after_segment_search");
+
             if (!milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
+                milvus::tracer::AddEvent("before_distance_negation");
                 for (auto& dis : search_result->distances_) {
                     dis *= -1;
                 }
+                milvus::tracer::AddEvent("after_distance_negation");
             }
+
+            milvus::tracer::AddEvent("before_span_end");
             span->End();
             milvus::tracer::CloseRootSpan();
+            milvus::tracer::AddEvent("async_lambda_end");
             return search_result.release();
         });
     return static_cast<CFuture*>(static_cast<void*>(

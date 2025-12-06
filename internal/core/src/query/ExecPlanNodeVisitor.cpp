@@ -44,10 +44,16 @@ ExecPlanNodeVisitor::ExecuteTask(
               plan.plan_node_->ToString(),
               query_context->get_active_count(),
               query_context->get_query_timestamp());
+    
+    milvus::tracer::AddEvent("execute_task_before_create");
     auto task =
         milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
+    milvus::tracer::AddEvent("execute_task_after_create");
+    
     int64_t processed_num = 0;
     BitsetType bitset_holder;
+    
+    milvus::tracer::AddEvent("execute_task_before_loop");
     for (;;) {
         auto result = task->Next();
         if (!result) {
@@ -66,6 +72,7 @@ ExecPlanNodeVisitor::ExecuteTask(
             ThrowInfo(UnexpectedError, "expr return type not matched");
         }
     }
+    milvus::tracer::AddEvent("execute_task_after_loop");
     return bitset_holder;
 }
 
@@ -85,9 +92,13 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         return;
     }
 
+    milvus::tracer::AddEvent("visitor_before_plan_fragment");
+    
     // Construct plan fragment
     auto plan = plan::PlanFragment(node.plannodes_);
 
+    milvus::tracer::AddEvent("visitor_before_query_context");
+    
     // Set query context
     auto query_context =
         std::make_shared<milvus::exec::QueryContext>(DEAFULT_QUERY_ID,
@@ -105,8 +116,12 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     auto op_context = milvus::OpContext();
     query_context->set_op_context(&op_context);
 
+    milvus::tracer::AddEvent("visitor_before_execute_task");
+    
     // Do plan fragment task work
     auto result = ExecuteTask(plan, query_context);
+    
+    milvus::tracer::AddEvent("visitor_after_execute_task");
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());
