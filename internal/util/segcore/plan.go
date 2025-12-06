@@ -87,11 +87,6 @@ type SearchRequest struct {
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
-
-	// Guard: multi-field BM25 is not yet supported in segcore/native.
-	if req.GetReq().GetBm25MultiField() {
-		return nil, errors.New("bm25_multi_field is not yet supported in QueryNode/segcore")
-	}
 	plan, err := createSearchPlanByExpr(collection, expr)
 	if err != nil {
 		return nil, err
