@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -745,6 +746,8 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
 	)
+	span := trace.SpanFromContext(ctx)
+	hasSpan := span.SpanContext().IsValid()
 	channelsMvcc := make(map[string]uint64)
 	for _, ch := range req.GetDmlChannels() {
 		channelsMvcc[ch] = req.GetReq().GetMvccTimestamp()
@@ -771,7 +774,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	searchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	tr := timerecord.NewTimeRecorder("searchSegments")
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "searchSegments")
 	log.Debug("search segments...")
 
 	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
@@ -792,17 +795,35 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		task = tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
 	}
 
+	if hasSpan {
+		span.AddEvent("searchSegments.schedule.enqueue", trace.WithAttributes(
+			attribute.Int("segment_count", len(req.GetSegmentIDs())),
+			attribute.String("channel", channel),
+		))
+	}
+	enqueueStart := time.Now()
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	if hasSpan {
+		span.AddEvent("searchSegments.schedule.enqueued", trace.WithAttributes(
+			attribute.Int64("enqueue_ms", time.Since(enqueueStart).Milliseconds()),
+		))
+	}
 
+	waitStart := time.Now()
 	err := task.Wait()
 	if err != nil {
 		log.Warn("failed to search segments", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+	if hasSpan {
+		span.AddEvent("searchSegments.schedule.wait_done", trace.WithAttributes(
+			attribute.Int64("wait_ms", time.Since(waitStart).Milliseconds()),
+		))
 	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("search segments done, channel = %s, segmentIDs = %v",

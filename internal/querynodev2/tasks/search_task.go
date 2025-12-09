@@ -9,9 +9,11 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -55,6 +57,7 @@ type SearchTask struct {
 
 	tr           *timerecord.TimeRecorder
 	scheduleSpan trace.Span
+	readyEnqueue time.Time
 }
 
 func NewSearchTask(ctx context.Context,
@@ -95,6 +98,25 @@ func (t *SearchTask) GetNodeID() int64 {
 
 func (t *SearchTask) IsGpuIndex() bool {
 	return t.collection.IsGpuIndex()
+}
+
+// MarkReadyEnqueue records when the task enters the ready queue.
+func (t *SearchTask) MarkReadyEnqueue(attrs ...attribute.KeyValue) {
+	if t.scheduleSpan == nil {
+		return
+	}
+	t.readyEnqueue = time.Now()
+	t.scheduleSpan.AddEvent("schedule.ready_enqueue", trace.WithAttributes(attrs...))
+}
+
+// MarkReadyDequeue records when the task leaves the ready queue and how long it waited there.
+func (t *SearchTask) MarkReadyDequeue(attrs ...attribute.KeyValue) {
+	if t.scheduleSpan == nil || t.readyEnqueue.IsZero() {
+		return
+	}
+	waitMs := time.Since(t.readyEnqueue).Milliseconds()
+	attrs = append(attrs, attribute.Int64("ready_wait_ms", waitMs))
+	t.scheduleSpan.AddEvent("schedule.ready_dequeue", trace.WithAttributes(attrs...))
 }
 
 func (t *SearchTask) PreExecute() error {
@@ -228,13 +250,14 @@ func (t *SearchTask) Execute() error {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
 	}
+	reduceDuration := tr.CtxRecord(t.ctx, "search reduce")
 	defer segcore.DeleteSearchResultDataBlobs(blobs)
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(t.GetNodeID()),
 		metrics.SearchLabel,
 		metrics.ReduceSegments,
 		metrics.BatchReduce).
-		Observe(float64(tr.RecordSpan().Milliseconds()))
+		Observe(float64(reduceDuration.Milliseconds()))
 	for i := range t.originNqs {
 		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {
