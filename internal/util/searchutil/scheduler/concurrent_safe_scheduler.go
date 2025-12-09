@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -39,6 +40,12 @@ func newScheduler(policy schedulePolicy) Scheduler {
 type addTaskReq struct {
 	task Task
 	err  chan<- error
+}
+
+// readyQueueTracer optionally lets tasks receive instrumentation callbacks for ready-queue timing.
+type readyQueueTracer interface {
+	MarkReadyEnqueue(attrs ...attribute.KeyValue)
+	MarkReadyDequeue(attrs ...attribute.KeyValue)
 }
 
 // scheduler is a general concurrent safe scheduler implementation by wrapping a schedule policy.
@@ -140,6 +147,12 @@ func (s *scheduler) schedule() {
 			// And consume recv chan as much as possible.
 			s.consumeRecvChan(req, maxReceiveChanBatchConsumeNum)
 		case execChan <- task:
+			if tracer, ok := task.(readyQueueTracer); ok {
+				tracer.MarkReadyDequeue(
+					attribute.Int("ready_len", s.policy.Len()),
+					attribute.Int64("waiting_nq", s.GetWaitingTaskTotalNQ()),
+				)
+			}
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
@@ -185,6 +198,12 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64) b
 		newTaskAdded, err := s.policy.Push(req.task)
 		if err == nil {
 			s.updateWaitingTaskCounter(int64(newTaskAdded), nq)
+			if tracer, ok := req.task.(readyQueueTracer); ok {
+				tracer.MarkReadyEnqueue(
+					attribute.Int("ready_len", s.policy.Len()),
+					attribute.Int64("waiting_nq", s.GetWaitingTaskTotalNQ()),
+				)
+			}
 		}
 		req.err <- err
 	}
@@ -203,6 +222,12 @@ func (s *scheduler) produceExecChan() Task {
 
 		select {
 		case execChan <- task:
+			if tracer, ok := task.(readyQueueTracer); ok {
+				tracer.MarkReadyDequeue(
+					attribute.Int("ready_len", s.policy.Len()),
+					attribute.Int64("waiting_nq", s.GetWaitingTaskTotalNQ()),
+				)
+			}
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
 			// Task sent, drop the ownership of sent task.
