@@ -39,6 +39,7 @@ pipeline {
                         sed -i. 's/--dirty="-dev"//g' Makefile
                         export IS_NETWORK_MODE_HOST="true"
                         export OS_NAME=ubuntu22.04
+                        export USE_REDDIT_KNOWHERE="ON"
                         ./build/builder_gpu.sh /bin/bash -c \"make gpu-install\"
                         """
 

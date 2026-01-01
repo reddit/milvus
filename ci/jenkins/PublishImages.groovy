@@ -51,6 +51,7 @@ pipeline {
                                 # disable dirty tag
                                 sed -i. 's/--dirty="-dev"//g' Makefile
                                 export IS_NETWORK_MODE_HOST="true"
+                                export USE_REDDIT_KNOWHERE="ON"
                                 build/builder.sh /bin/bash -c \"make install\"
                                 """
 
