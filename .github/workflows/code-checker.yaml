@@ -92,7 +92,7 @@ jobs:
       - name: Code Check
         run: |
           sed -i 's/ubuntu22.04/amazonlinux2023/g' .env
-          ./build/builder.sh /bin/bash -c "make install"
+          ./build/builder.sh /bin/bash -c "make USE_REDDIT_KNOWHERE=ON install"
       - name: Save Caches
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
@@ -124,7 +124,7 @@ jobs:
       - name: Code Check
         run: |
           sed -i 's/ubuntu22.04/rockylinux8/g' .env
-          ./build/builder.sh /bin/bash -c "make install"
+          ./build/builder.sh /bin/bash -c "make USE_REDDIT_KNOWHERE=ON install"
       - name: Save Caches
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
