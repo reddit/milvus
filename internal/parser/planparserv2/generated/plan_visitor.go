@@ -22,6 +22,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TextSearch.
+	VisitTextSearch(ctx *TextSearchContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#JSONContainsAll.
 	VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{}
 
@@ -150,4 +153,28 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#textMatchOption.
 	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#SingleTextField.
+	VisitSingleTextField(ctx *SingleTextFieldContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#MultiTextField.
+	VisitMultiTextField(ctx *MultiTextFieldContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#textSearchOptions.
+	VisitTextSearchOptions(ctx *TextSearchOptionsContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#TextSearchTopK.
+	VisitTextSearchTopK(ctx *TextSearchTopKContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#TextSearchWeights.
+	VisitTextSearchWeights(ctx *TextSearchWeightsContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#TextSearchAggregation.
+	VisitTextSearchAggregation(ctx *TextSearchAggregationContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#TextSearchSlop.
+	VisitTextSearchSlop(ctx *TextSearchSlopContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#TextSearchMinShouldMatch.
+	VisitTextSearchMinShouldMatch(ctx *TextSearchMinShouldMatchContext) interface{}
 }
