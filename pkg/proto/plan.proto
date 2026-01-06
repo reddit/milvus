@@ -242,6 +242,26 @@ message RandomSampleExpr {
   Expr predicate = 2;
 }
 
+// BM25AggregationType defines how to aggregate scores from multiple text fields.
+// Used for multi-field text search.
+enum BM25AggregationType {
+  BM25AggWeightedSum = 0;  // Sum of (weight * score) across all fields
+  BM25AggMax = 1;          // Max score across all fields
+}
+
+// TextSearchExpr performs a BM25 scored text search across one or more fields.
+// Unlike TextMatch which returns a bitset, this returns scored results suitable for ranking.
+// Can be used as an ANN request alternative in hybrid search.
+message TextSearchExpr {
+  repeated int64 field_ids = 1;           // Field IDs to search
+  string query = 2;                        // Search query text
+  int64 topk = 3;                          // Number of top results to return
+  repeated float weights = 4;              // Per-field weights (aligned with field_ids)
+  BM25AggregationType aggregation = 5;     // Aggregation strategy for multi-field
+  uint32 slop = 6;                         // Phrase slop (0 = exact match)
+  uint32 min_should_match = 7;             // Minimum terms that should match
+}
+
 message AlwaysTrueExpr {}
 
 message Interval {
@@ -282,6 +302,7 @@ message Expr {
     RandomSampleExpr random_sample_expr = 16;
     GISFunctionFilterExpr gisfunction_filter_expr = 17;
     TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
+    TextSearchExpr text_search_expr = 19;
   };
   bool is_template = 20;
 }
@@ -292,6 +313,19 @@ message VectorANNS {
   Expr predicates = 3;
   QueryInfo query_info = 4;
   string placeholder_tag = 5;  // always be "$0"
+}
+
+// TextSearchANNS represents a BM25 scored text search as a primary search operation.
+// Can be used in place of VectorANNS for text-based retrieval.
+message TextSearchANNS {
+  repeated int64 field_ids = 1;            // Field IDs to search
+  Expr predicates = 2;                      // Optional filter predicates
+  QueryInfo query_info = 3;                 // topk, metric_type (BM25), etc.
+  string placeholder_tag = 4;               // always be "$0" for query text
+  repeated float weights = 5;               // Per-field weights
+  BM25AggregationType aggregation = 6;      // Aggregation strategy
+  uint32 slop = 7;                          // Phrase slop (0 = exact match)
+  uint32 min_should_match = 8;              // Minimum terms that should match
 }
 
 message QueryPlanNode {
@@ -340,6 +374,7 @@ message PlanNode {
     VectorANNS vector_anns = 1;
     Expr predicates = 2; // deprecated, use query instead.
     QueryPlanNode query = 4;
+    TextSearchANNS text_search_anns = 9;  // BM25 scored text search
   }
   repeated int64 output_field_ids = 3;
   repeated string dynamic_fields = 5;
