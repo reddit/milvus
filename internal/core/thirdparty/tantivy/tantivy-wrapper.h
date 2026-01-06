@@ -992,6 +992,73 @@ struct TantivyIndexWrapper {
             "TantivyIndexWrapper.ngram_match_query: invalid result type");
     }
 
+    /// BM25 scored text search - returns (doc_ids, scores) pairs
+    /// instead of just a bitset.
+    std::pair<std::vector<uint32_t>, std::vector<float>>
+    bm25_search_query(const std::string& query, uintptr_t topk) {
+        RustScoredSearchResult result{};
+        auto res = RustResultWrapper(
+            tantivy_bm25_search_query(reader_, query.c_str(), topk, &result));
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.bm25_search_query: {}",
+                   res.result_->error);
+        
+        std::vector<uint32_t> doc_ids;
+        std::vector<float> scores;
+        if (result.len > 0) {
+            doc_ids.assign(result.doc_ids, result.doc_ids + result.len);
+            scores.assign(result.scores, result.scores + result.len);
+        }
+        free_rust_scored_search_result(result);
+        return {std::move(doc_ids), std::move(scores)};
+    }
+
+    /// BM25 scored text search with minimum_should_match parameter.
+    std::pair<std::vector<uint32_t>, std::vector<float>>
+    bm25_search_query_with_minimum(const std::string& query,
+                                   uintptr_t min_should_match,
+                                   uintptr_t topk) {
+        RustScoredSearchResult result{};
+        auto res = RustResultWrapper(
+            tantivy_bm25_search_query_with_minimum(
+                reader_, query.c_str(), min_should_match, topk, &result));
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.bm25_search_query_with_minimum: {}",
+                   res.result_->error);
+        
+        std::vector<uint32_t> doc_ids;
+        std::vector<float> scores;
+        if (result.len > 0) {
+            doc_ids.assign(result.doc_ids, result.doc_ids + result.len);
+            scores.assign(result.scores, result.scores + result.len);
+        }
+        free_rust_scored_search_result(result);
+        return {std::move(doc_ids), std::move(scores)};
+    }
+
+    /// BM25 scored phrase search - returns (doc_ids, scores) pairs.
+    std::pair<std::vector<uint32_t>, std::vector<float>>
+    bm25_phrase_search_query(const std::string& query,
+                             uint32_t slop,
+                             uintptr_t topk) {
+        RustScoredSearchResult result{};
+        auto res = RustResultWrapper(
+            tantivy_bm25_phrase_search_query(
+                reader_, query.c_str(), slop, topk, &result));
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.bm25_phrase_search_query: {}",
+                   res.result_->error);
+        
+        std::vector<uint32_t> doc_ids;
+        std::vector<float> scores;
+        if (result.len > 0) {
+            doc_ids.assign(result.doc_ids, result.doc_ids + result.len);
+            scores.assign(result.scores, result.scores + result.len);
+        }
+        free_rust_scored_search_result(result);
+        return {std::move(doc_ids), std::move(scores)};
+    }
+
     // json query
     template <typename T>
     void

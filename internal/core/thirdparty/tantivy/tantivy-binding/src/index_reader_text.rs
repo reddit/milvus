@@ -1,13 +1,17 @@
 use std::ffi::c_void;
 
 use tantivy::{
+    collector::TopDocs,
     query::{BooleanQuery, PhraseQuery},
+    schema::Value,
     tokenizer::{TextAnalyzer, TokenStream},
+    TantivyDocument,
     Term,
 };
 
 use crate::{
     analyzer::standard_analyzer, error::TantivyBindingError, index_reader::IndexReaderWrapper,
+    array::RustScoredSearchResult,
 };
 use crate::{
     bitset_wrapper::BitsetWrapper, direct_bitset_collector::DirectBitsetCollector, error::Result,
@@ -102,6 +106,198 @@ impl IndexReaderWrapper {
 
     pub(crate) fn register_tokenizer(&self, tokenizer_name: String, tokenizer: TextAnalyzer) {
         self.index.tokenizers().register(&tokenizer_name, tokenizer)
+    }
+
+    /// Performs a BM25 scored text search and returns top-k results with scores.
+    /// This is similar to match_query but returns relevance scores instead of just matching doc IDs.
+    pub(crate) fn bm25_search_query(&self, q: &str, topk: usize) -> Result<RustScoredSearchResult> {
+        let mut tokenizer = self
+            .index
+            .tokenizer_for_field(self.field)
+            .unwrap_or(standard_analyzer(vec![]))
+            .clone();
+        let mut token_stream = tokenizer.token_stream(q);
+        let mut terms: Vec<Term> = Vec::new();
+        while token_stream.advance() {
+            let token = token_stream.token();
+            terms.push(Term::from_field_text(self.field, &token.text));
+        }
+        
+        if terms.is_empty() {
+            return Ok(RustScoredSearchResult::default());
+        }
+
+        let query = BooleanQuery::new_multiterms_query(terms);
+        let searcher = self.reader.searcher();
+        let top_docs = searcher
+            .search(&query, &TopDocs::with_limit(topk))
+            .map_err(TantivyBindingError::TantivyError)?;
+
+        let mut doc_ids: Vec<u32> = Vec::with_capacity(top_docs.len());
+        let mut scores: Vec<f32> = Vec::with_capacity(top_docs.len());
+
+        for (score, doc_address) in top_docs {
+            // Get the milvus doc ID from the tantivy doc
+            let doc_id = if self.user_specified_doc_id {
+                doc_address.doc_id
+            } else if let Some(id_field) = self.id_field {
+                let doc: TantivyDocument = searcher.doc(doc_address).map_err(TantivyBindingError::TantivyError)?;
+                doc.get_first(id_field)
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(doc_address.doc_id as i64) as u32
+            } else {
+                doc_address.doc_id
+            };
+            doc_ids.push(doc_id);
+            scores.push(score);
+        }
+
+        Ok(RustScoredSearchResult::from_vecs(doc_ids, scores))
+    }
+
+    /// Performs a BM25 scored text search with minimum_should_match parameter.
+    pub(crate) fn bm25_search_query_with_minimum(
+        &self,
+        q: &str,
+        min_should_match: usize,
+        topk: usize,
+    ) -> Result<RustScoredSearchResult> {
+        let mut tokenizer = self
+            .index
+            .tokenizer_for_field(self.field)
+            .unwrap_or(standard_analyzer(vec![]))
+            .clone();
+        let mut token_stream = tokenizer.token_stream(q);
+        let mut terms: Vec<Term> = Vec::new();
+        while token_stream.advance() {
+            let token = token_stream.token();
+            terms.push(Term::from_field_text(self.field, &token.text));
+        }
+
+        if terms.is_empty() {
+            return Ok(RustScoredSearchResult::default());
+        }
+
+        use tantivy::query::{Occur, TermQuery};
+        use tantivy::schema::IndexRecordOption;
+        
+        let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+        for term in terms.into_iter() {
+            subqueries.push((
+                Occur::Should,
+                Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
+            ));
+        }
+        let effective_min = std::cmp::max(1, min_should_match);
+        let query = BooleanQuery::with_minimum_required_clauses(subqueries, effective_min);
+
+        let searcher = self.reader.searcher();
+        let top_docs = searcher
+            .search(&query, &TopDocs::with_limit(topk))
+            .map_err(TantivyBindingError::TantivyError)?;
+
+        let mut doc_ids: Vec<u32> = Vec::with_capacity(top_docs.len());
+        let mut scores: Vec<f32> = Vec::with_capacity(top_docs.len());
+
+        for (score, doc_address) in top_docs {
+            let doc_id = if self.user_specified_doc_id {
+                doc_address.doc_id
+            } else if let Some(id_field) = self.id_field {
+                let doc: TantivyDocument = searcher.doc(doc_address).map_err(TantivyBindingError::TantivyError)?;
+                doc.get_first(id_field)
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(doc_address.doc_id as i64) as u32
+            } else {
+                doc_address.doc_id
+            };
+            doc_ids.push(doc_id);
+            scores.push(score);
+        }
+
+        Ok(RustScoredSearchResult::from_vecs(doc_ids, scores))
+    }
+
+    /// Performs a BM25 scored phrase search and returns top-k results with scores.
+    pub(crate) fn bm25_phrase_search_query(
+        &self,
+        q: &str,
+        slop: u32,
+        topk: usize,
+    ) -> Result<RustScoredSearchResult> {
+        let mut tokenizer = self
+            .index
+            .tokenizer_for_field(self.field)
+            .unwrap_or(standard_analyzer(vec![]))
+            .clone();
+        let mut token_stream = tokenizer.token_stream(q);
+        let mut terms: Vec<Term> = Vec::new();
+        let mut positions = vec![];
+        
+        while token_stream.advance() {
+            let token = token_stream.token();
+            positions.push(token.position);
+            terms.push(Term::from_field_text(self.field, &token.text));
+        }
+
+        if terms.is_empty() {
+            return Ok(RustScoredSearchResult::default());
+        }
+
+        let searcher = self.reader.searcher();
+
+        // If only one term, fall back to term query
+        if terms.len() <= 1 {
+            let query = BooleanQuery::new_multiterms_query(terms);
+            let top_docs = searcher
+                .search(&query, &TopDocs::with_limit(topk))
+                .map_err(TantivyBindingError::TantivyError)?;
+
+            let mut doc_ids: Vec<u32> = Vec::with_capacity(top_docs.len());
+            let mut scores: Vec<f32> = Vec::with_capacity(top_docs.len());
+
+            for (score, doc_address) in top_docs {
+                let doc_id = if self.user_specified_doc_id {
+                    doc_address.doc_id
+                } else if let Some(id_field) = self.id_field {
+                    let doc: TantivyDocument = searcher.doc(doc_address).map_err(TantivyBindingError::TantivyError)?;
+                    doc.get_first(id_field)
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(doc_address.doc_id as i64) as u32
+                } else {
+                    doc_address.doc_id
+                };
+                doc_ids.push(doc_id);
+                scores.push(score);
+            }
+            return Ok(RustScoredSearchResult::from_vecs(doc_ids, scores));
+        }
+
+        let terms_with_offset: Vec<_> = positions.into_iter().zip(terms.into_iter()).collect();
+        let phrase_query = PhraseQuery::new_with_offset_and_slop(terms_with_offset, slop);
+        
+        let top_docs = searcher
+            .search(&phrase_query, &TopDocs::with_limit(topk))
+            .map_err(TantivyBindingError::TantivyError)?;
+
+        let mut doc_ids: Vec<u32> = Vec::with_capacity(top_docs.len());
+        let mut scores: Vec<f32> = Vec::with_capacity(top_docs.len());
+
+        for (score, doc_address) in top_docs {
+            let doc_id = if self.user_specified_doc_id {
+                doc_address.doc_id
+            } else if let Some(id_field) = self.id_field {
+                let doc: TantivyDocument = searcher.doc(doc_address).map_err(TantivyBindingError::TantivyError)?;
+                doc.get_first(id_field)
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(doc_address.doc_id as i64) as u32
+            } else {
+                doc_address.doc_id
+            };
+            doc_ids.push(doc_id);
+            scores.push(score);
+        }
+
+        Ok(RustScoredSearchResult::from_vecs(doc_ids, scores))
     }
 }
 

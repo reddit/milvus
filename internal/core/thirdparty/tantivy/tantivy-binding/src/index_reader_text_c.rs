@@ -3,7 +3,7 @@ use std::ffi::CStr;
 use libc::{c_char, c_void};
 
 use crate::{
-    analyzer::create_analyzer, array::RustResult, cstr_to_str, index_reader::IndexReaderWrapper,
+    analyzer::create_analyzer, array::{RustResult, RustScoredSearchResult}, cstr_to_str, index_reader::IndexReaderWrapper,
     log::init_log,
 };
 
@@ -56,5 +56,71 @@ pub extern "C" fn tantivy_register_tokenizer(
             Ok(()).into()
         },
         Err(err) => RustResult::from_error(err.to_string()),
+    }
+}
+
+/// Performs a BM25 scored text search and returns top-k results with scores.
+/// Returns a RustScoredSearchResult containing doc_ids and scores arrays.
+#[no_mangle]
+pub extern "C" fn tantivy_bm25_search_query(
+    ptr: *mut c_void,
+    query: *const c_char,
+    topk: usize,
+    result: *mut RustScoredSearchResult,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let query = cstr_to_str!(query);
+    unsafe {
+        match (*real).bm25_search_query(query, topk) {
+            Ok(scored_result) => {
+                *result = scored_result;
+                Ok(()).into()
+            }
+            Err(e) => RustResult::from_error(e.to_string()),
+        }
+    }
+}
+
+/// Performs a BM25 scored text search with minimum_should_match parameter.
+#[no_mangle]
+pub extern "C" fn tantivy_bm25_search_query_with_minimum(
+    ptr: *mut c_void,
+    query: *const c_char,
+    min_should_match: usize,
+    topk: usize,
+    result: *mut RustScoredSearchResult,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let query = cstr_to_str!(query);
+    unsafe {
+        match (*real).bm25_search_query_with_minimum(query, min_should_match, topk) {
+            Ok(scored_result) => {
+                *result = scored_result;
+                Ok(()).into()
+            }
+            Err(e) => RustResult::from_error(e.to_string()),
+        }
+    }
+}
+
+/// Performs a BM25 scored phrase search and returns top-k results with scores.
+#[no_mangle]
+pub extern "C" fn tantivy_bm25_phrase_search_query(
+    ptr: *mut c_void,
+    query: *const c_char,
+    slop: u32,
+    topk: usize,
+    result: *mut RustScoredSearchResult,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let query = cstr_to_str!(query);
+    unsafe {
+        match (*real).bm25_phrase_search_query(query, slop, topk) {
+            Ok(scored_result) => {
+                *result = scored_result;
+                Ok(()).into()
+            }
+            Err(e) => RustResult::from_error(e.to_string()),
+        }
     }
 }
