@@ -58,14 +58,10 @@ class TextMatchIndexBM25Test : public ::testing::Test {
             "{}");
     }
 
-    void AddDocuments(TextMatchIndex* index, 
+    void AddDocuments(TextMatchIndex* index,
                       const std::vector<std::string>& docs,
                       bool is_nullable = false) {
-        std::vector<const char*> ptrs;
-        for (const auto& doc : docs) {
-            ptrs.push_back(doc.c_str());
-        }
-        index->AddTexts(docs.size(), ptrs.data(), nullptr);
+        index->AddTextsGrowing(docs.size(), docs.data(), nullptr, 0);
         index->Commit();
         index->Reload();
     }
