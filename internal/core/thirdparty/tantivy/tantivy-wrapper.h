@@ -1059,6 +1059,33 @@ struct TantivyIndexWrapper {
         return {std::move(doc_ids), std::move(scores)};
     }
 
+    /// BM25 scored text search with a filter bitset.
+    /// The filter bitset contains 1 for documents to EXCLUDE.
+    /// This is more efficient than searching and then filtering post-hoc.
+    std::pair<std::vector<uint32_t>, std::vector<float>>
+    bm25_search_query_with_filter(const std::string& query,
+                                   uintptr_t topk,
+                                   const uint8_t* filter_bitset,
+                                   size_t filter_bitset_len) {
+        RustScoredSearchResult result{};
+        auto res = RustResultWrapper(
+            tantivy_bm25_search_query_with_filter(
+                reader_, query.c_str(), topk,
+                filter_bitset, filter_bitset_len, &result));
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.bm25_search_query_with_filter: {}",
+                   res.result_->error);
+        
+        std::vector<uint32_t> doc_ids;
+        std::vector<float> scores;
+        if (result.len > 0) {
+            doc_ids.assign(result.doc_ids, result.doc_ids + result.len);
+            scores.assign(result.scores, result.scores + result.len);
+        }
+        free_rust_scored_search_result(result);
+        return {std::move(doc_ids), std::move(scores)};
+    }
+
     // json query
     template <typename T>
     void

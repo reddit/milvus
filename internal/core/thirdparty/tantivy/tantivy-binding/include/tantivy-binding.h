@@ -336,6 +336,16 @@ RustResult tantivy_bm25_phrase_search_query(void *ptr,
                                             uintptr_t topk,
                                             RustScoredSearchResult *result);
 
+/// Performs a BM25 scored text search with a filter bitset.
+/// The filter bitset contains 1 for documents to EXCLUDE.
+/// This is more efficient than searching and then filtering post-hoc.
+RustResult tantivy_bm25_search_query_with_filter(void *ptr,
+                                                 const char *query,
+                                                 uintptr_t topk,
+                                                 const uint8_t *filter_bitset,
+                                                 uintptr_t filter_bitset_len,
+                                                 RustScoredSearchResult *result);
+
 RustResult tantivy_create_index(const char *field_name,
                                 TantivyDataType data_type,
                                 const char *path,

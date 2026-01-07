@@ -124,3 +124,37 @@ pub extern "C" fn tantivy_bm25_phrase_search_query(
         }
     }
 }
+
+/// Performs a BM25 scored text search with a filter bitset.
+/// The filter bitset contains 1 for documents to EXCLUDE.
+/// This is more efficient than searching and then filtering post-hoc.
+#[no_mangle]
+pub extern "C" fn tantivy_bm25_search_query_with_filter(
+    ptr: *mut c_void,
+    query: *const c_char,
+    topk: usize,
+    filter_bitset: *const u8,
+    filter_bitset_len: usize,
+    result: *mut RustScoredSearchResult,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let query = cstr_to_str!(query);
+    
+    // Convert filter bitset pointer to slice
+    let filter_slice = if filter_bitset.is_null() || filter_bitset_len == 0 {
+        &[] as &[u8]
+    } else {
+        let byte_len = (filter_bitset_len + 7) / 8;
+        unsafe { std::slice::from_raw_parts(filter_bitset, byte_len) }
+    };
+
+    unsafe {
+        match (*real).bm25_search_query_with_filter(query, topk, filter_slice, filter_bitset_len) {
+            Ok(scored_result) => {
+                *result = scored_result;
+                Ok(()).into()
+            }
+            Err(e) => RustResult::from_error(e.to_string()),
+        }
+    }
+}
