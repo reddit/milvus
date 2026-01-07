@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -128,6 +129,41 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                 search_info.iterator_v2_info_->last_bound =
                     iterator_v2_info_proto.last_bound();
             }
+        }
+
+        // Parse multi-field TEXT_BM25 parameters from search_params
+        // bm25_field_ids: comma-separated additional field IDs (e.g., "101,102,103")
+        // bm25_weights: comma-separated weights for all fields (e.g., "1.0,0.5,0.5")
+        // bm25_agg: aggregation type ("weighted_sum" or "max")
+        if (search_info.search_params_.contains("bm25_field_ids")) {
+            std::string field_ids_str =
+                search_info.search_params_["bm25_field_ids"].get<std::string>();
+            std::stringstream ss(field_ids_str);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+                if (!token.empty()) {
+                    search_info.additional_field_ids_.push_back(
+                        FieldId(std::stoll(token)));
+                }
+            }
+        }
+
+        if (search_info.search_params_.contains("bm25_weights")) {
+            std::string weights_str =
+                search_info.search_params_["bm25_weights"].get<std::string>();
+            std::stringstream ss(weights_str);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+                if (!token.empty()) {
+                    search_info.bm25_weights_.push_back(std::stof(token));
+                }
+            }
+        }
+
+        if (search_info.search_params_.contains("bm25_agg")) {
+            std::string agg_type =
+                search_info.search_params_["bm25_agg"].get<std::string>();
+            search_info.bm25_use_max_aggregation_ = (agg_type == "max");
         }
 
         return search_info;

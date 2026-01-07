@@ -6,6 +6,13 @@
 #include <ostream>
 #include <new>
 
+/// BM25 aggregation type for multi-field search.
+/// 0 = WeightedSum (default), 1 = Max
+enum class BM25AggregationType {
+  WeightedSum = 0,
+  Max = 1,
+};
+
 enum class TantivyDataType : uint8_t {
   Text,
   Keyword,
@@ -345,6 +352,36 @@ RustResult tantivy_bm25_search_query_with_filter(void *ptr,
                                                  const uint8_t *filter_bitset,
                                                  uintptr_t filter_bitset_len,
                                                  RustScoredSearchResult *result);
+
+/// Performs multi-field BM25 search by querying multiple text indexes and aggregating results.
+/// This enables native multi-field text search without requiring HybridSearch + Reranker.
+///
+/// # Arguments
+/// * `readers` - Array of IndexReaderWrapper pointers for each field
+/// * `num_readers` - Number of readers
+/// * `query` - Search query text
+/// * `topk` - Number of top results per field (before aggregation)
+/// * `weights` - Weight for each field (array of floats, length must match num_readers)
+/// * `aggregation` - How to combine scores (0 = WeightedSum, 1 = Max)
+/// * `result` - Output result
+RustResult tantivy_bm25_multi_field_search(void *const *readers,
+                                           uintptr_t num_readers,
+                                           const char *query,
+                                           uintptr_t topk,
+                                           const float *weights,
+                                           BM25AggregationType aggregation,
+                                           RustScoredSearchResult *result);
+
+/// Performs multi-field BM25 search with a filter bitset.
+RustResult tantivy_bm25_multi_field_search_with_filter(void *const *readers,
+                                                       uintptr_t num_readers,
+                                                       const char *query,
+                                                       uintptr_t topk,
+                                                       const float *weights,
+                                                       BM25AggregationType aggregation,
+                                                       const uint8_t *filter_bitset,
+                                                       uintptr_t filter_bitset_len,
+                                                       RustScoredSearchResult *result);
 
 RustResult tantivy_create_index(const char *field_name,
                                 TantivyDataType data_type,

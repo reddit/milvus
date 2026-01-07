@@ -158,3 +158,177 @@ pub extern "C" fn tantivy_bm25_search_query_with_filter(
         }
     }
 }
+
+/// BM25 aggregation type for multi-field search.
+/// 0 = WeightedSum (default), 1 = Max
+#[repr(C)]
+pub enum BM25AggregationType {
+    WeightedSum = 0,
+    Max = 1,
+}
+
+impl From<BM25AggregationType> for crate::index_reader_text::BM25AggregationType {
+    fn from(c_type: BM25AggregationType) -> Self {
+        match c_type {
+            BM25AggregationType::WeightedSum => crate::index_reader_text::BM25AggregationType::WeightedSum,
+            BM25AggregationType::Max => crate::index_reader_text::BM25AggregationType::Max,
+        }
+    }
+}
+
+/// Performs multi-field BM25 search by querying multiple text indexes and aggregating results.
+/// This enables native multi-field text search without requiring HybridSearch + Reranker.
+///
+/// # Arguments
+/// * `readers` - Array of IndexReaderWrapper pointers for each field
+/// * `num_readers` - Number of readers
+/// * `query` - Search query text
+/// * `topk` - Number of top results per field (before aggregation)
+/// * `weights` - Weight for each field (array of floats, length must match num_readers)
+/// * `aggregation` - How to combine scores (0 = WeightedSum, 1 = Max)
+/// * `result` - Output result
+#[no_mangle]
+pub extern "C" fn tantivy_bm25_multi_field_search(
+    readers: *const *mut c_void,
+    num_readers: usize,
+    query: *const c_char,
+    topk: usize,
+    weights: *const f32,
+    aggregation: BM25AggregationType,
+    result: *mut RustScoredSearchResult,
+) -> RustResult {
+    if readers.is_null() || num_readers == 0 || weights.is_null() {
+        return RustResult::from_error("Invalid arguments: readers or weights is null".to_string());
+    }
+
+    let query = cstr_to_str!(query);
+
+    // Convert weights to slice
+    let weights_slice = unsafe { std::slice::from_raw_parts(weights, num_readers) };
+
+    // Query each field and collect results
+    let mut field_results: Vec<(Vec<u32>, Vec<f32>)> = Vec::with_capacity(num_readers);
+
+    for i in 0..num_readers {
+        let reader_ptr = unsafe { *readers.add(i) };
+        if reader_ptr.is_null() {
+            continue;
+        }
+
+        let reader = reader_ptr as *mut IndexReaderWrapper;
+        match unsafe { (*reader).bm25_search_query(query, topk) } {
+            Ok(scored_result) => {
+                // Convert RustScoredSearchResult to Vec
+                let doc_ids: Vec<u32> = unsafe {
+                    std::slice::from_raw_parts(scored_result.doc_ids, scored_result.len).to_vec()
+                };
+                let scores: Vec<f32> = unsafe {
+                    std::slice::from_raw_parts(scored_result.scores, scored_result.len).to_vec()
+                };
+                // Free the intermediate result
+                crate::array::free_rust_scored_search_result(scored_result);
+                field_results.push((doc_ids, scores));
+            }
+            Err(e) => {
+                return RustResult::from_error(format!(
+                    "Failed to query field {}: {}",
+                    i,
+                    e.to_string()
+                ));
+            }
+        }
+    }
+
+    // Aggregate results
+    let aggregated = crate::index_reader_text::aggregate_multi_field_bm25_results(
+        field_results,
+        weights_slice,
+        aggregation.into(),
+        topk,
+    );
+
+    unsafe {
+        *result = aggregated;
+    }
+
+    Ok(()).into()
+}
+
+/// Performs multi-field BM25 search with a filter bitset.
+#[no_mangle]
+pub extern "C" fn tantivy_bm25_multi_field_search_with_filter(
+    readers: *const *mut c_void,
+    num_readers: usize,
+    query: *const c_char,
+    topk: usize,
+    weights: *const f32,
+    aggregation: BM25AggregationType,
+    filter_bitset: *const u8,
+    filter_bitset_len: usize,
+    result: *mut RustScoredSearchResult,
+) -> RustResult {
+    if readers.is_null() || num_readers == 0 || weights.is_null() {
+        return RustResult::from_error("Invalid arguments: readers or weights is null".to_string());
+    }
+
+    let query = cstr_to_str!(query);
+    let weights_slice = unsafe { std::slice::from_raw_parts(weights, num_readers) };
+
+    // Convert filter bitset
+    let filter_slice = if filter_bitset.is_null() || filter_bitset_len == 0 {
+        &[] as &[u8]
+    } else {
+        let byte_len = (filter_bitset_len + 7) / 8;
+        unsafe { std::slice::from_raw_parts(filter_bitset, byte_len) }
+    };
+
+    // Query each field with filter and collect results
+    let mut field_results: Vec<(Vec<u32>, Vec<f32>)> = Vec::with_capacity(num_readers);
+
+    for i in 0..num_readers {
+        let reader_ptr = unsafe { *readers.add(i) };
+        if reader_ptr.is_null() {
+            continue;
+        }
+
+        let reader = reader_ptr as *mut IndexReaderWrapper;
+        let search_result = if filter_slice.is_empty() {
+            unsafe { (*reader).bm25_search_query(query, topk) }
+        } else {
+            unsafe { (*reader).bm25_search_query_with_filter(query, topk, filter_slice, filter_bitset_len) }
+        };
+
+        match search_result {
+            Ok(scored_result) => {
+                let doc_ids: Vec<u32> = unsafe {
+                    std::slice::from_raw_parts(scored_result.doc_ids, scored_result.len).to_vec()
+                };
+                let scores: Vec<f32> = unsafe {
+                    std::slice::from_raw_parts(scored_result.scores, scored_result.len).to_vec()
+                };
+                crate::array::free_rust_scored_search_result(scored_result);
+                field_results.push((doc_ids, scores));
+            }
+            Err(e) => {
+                return RustResult::from_error(format!(
+                    "Failed to query field {}: {}",
+                    i,
+                    e.to_string()
+                ));
+            }
+        }
+    }
+
+    let aggregated = crate::index_reader_text::aggregate_multi_field_bm25_results(
+        field_results,
+        weights_slice,
+        aggregation.into(),
+        topk,
+    );
+
+    unsafe {
+        *result = aggregated;
+    }
+
+    Ok(()).into()
+}

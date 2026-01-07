@@ -1086,6 +1086,111 @@ struct TantivyIndexWrapper {
         return {std::move(doc_ids), std::move(scores)};
     }
 
+    /// Multi-field BM25 scored text search.
+    /// Queries multiple text indexes and aggregates scores.
+    /// @param readers - Vector of TantivyIndexWrapper pointers for each field
+    /// @param query - Search query text
+    /// @param topk - Number of top results per field (before aggregation)
+    /// @param weights - Weight for each field
+    /// @param aggregation - How to combine scores (BM25AggWeightedSum or BM25AggMax)
+    static std::pair<std::vector<uint32_t>, std::vector<float>>
+    bm25_multi_field_search(const std::vector<TantivyIndexWrapper*>& wrappers,
+                            const std::string& query,
+                            uintptr_t topk,
+                            const std::vector<float>& weights,
+                            BM25AggregationType aggregation) {
+        if (wrappers.empty() || weights.empty() || wrappers.size() != weights.size()) {
+            return {{}, {}};
+        }
+
+        // Collect reader pointers
+        std::vector<void*> readers;
+        readers.reserve(wrappers.size());
+        for (auto* wrapper : wrappers) {
+            if (wrapper != nullptr) {
+                readers.push_back(wrapper->get_reader());
+            }
+        }
+
+        if (readers.empty()) {
+            return {{}, {}};
+        }
+
+        RustScoredSearchResult result{};
+        auto res = RustResultWrapper(
+            tantivy_bm25_multi_field_search(
+                readers.data(),
+                readers.size(),
+                query.c_str(),
+                topk,
+                weights.data(),
+                aggregation,
+                &result));
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.bm25_multi_field_search: {}",
+                   res.result_->error);
+
+        std::vector<uint32_t> doc_ids;
+        std::vector<float> scores;
+        if (result.len > 0) {
+            doc_ids.assign(result.doc_ids, result.doc_ids + result.len);
+            scores.assign(result.scores, result.scores + result.len);
+        }
+        free_rust_scored_search_result(result);
+        return {std::move(doc_ids), std::move(scores)};
+    }
+
+    /// Multi-field BM25 scored text search with filter bitset.
+    static std::pair<std::vector<uint32_t>, std::vector<float>>
+    bm25_multi_field_search_with_filter(const std::vector<TantivyIndexWrapper*>& wrappers,
+                                        const std::string& query,
+                                        uintptr_t topk,
+                                        const std::vector<float>& weights,
+                                        BM25AggregationType aggregation,
+                                        const uint8_t* filter_bitset,
+                                        size_t filter_bitset_len) {
+        if (wrappers.empty() || weights.empty() || wrappers.size() != weights.size()) {
+            return {{}, {}};
+        }
+
+        std::vector<void*> readers;
+        readers.reserve(wrappers.size());
+        for (auto* wrapper : wrappers) {
+            if (wrapper != nullptr) {
+                readers.push_back(wrapper->get_reader());
+            }
+        }
+
+        if (readers.empty()) {
+            return {{}, {}};
+        }
+
+        RustScoredSearchResult result{};
+        auto res = RustResultWrapper(
+            tantivy_bm25_multi_field_search_with_filter(
+                readers.data(),
+                readers.size(),
+                query.c_str(),
+                topk,
+                weights.data(),
+                aggregation,
+                filter_bitset,
+                filter_bitset_len,
+                &result));
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.bm25_multi_field_search_with_filter: {}",
+                   res.result_->error);
+
+        std::vector<uint32_t> doc_ids;
+        std::vector<float> scores;
+        if (result.len > 0) {
+            doc_ids.assign(result.doc_ids, result.doc_ids + result.len);
+            scores.assign(result.scores, result.scores + result.len);
+        }
+        free_rust_scored_search_result(result);
+        return {std::move(doc_ids), std::move(scores)};
+    }
+
     // json query
     template <typename T>
     void

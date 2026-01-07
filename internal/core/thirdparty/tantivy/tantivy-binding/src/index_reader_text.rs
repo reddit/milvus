@@ -385,6 +385,80 @@ impl IndexReaderWrapper {
     }
 }
 
+/// Multi-field BM25 search result aggregation types.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BM25AggregationType {
+    /// Sum scores across fields weighted by field weights
+    WeightedSum,
+    /// Take maximum score across all fields
+    Max,
+}
+
+impl Default for BM25AggregationType {
+    fn default() -> Self {
+        BM25AggregationType::WeightedSum
+    }
+}
+
+/// Aggregates BM25 search results from multiple field indexes.
+/// This enables native multi-field text search without requiring HybridSearch + Reranker.
+///
+/// # Arguments
+/// * `results` - Vector of (doc_ids, scores) pairs from each field
+/// * `weights` - Weight for each field (must match results length)
+/// * `aggregation` - How to combine scores (WeightedSum or Max)
+/// * `topk` - Number of top results to return
+///
+/// # Returns
+/// * Combined (doc_ids, scores) sorted by aggregated score
+pub fn aggregate_multi_field_bm25_results(
+    results: Vec<(Vec<u32>, Vec<f32>)>,
+    weights: &[f32],
+    aggregation: BM25AggregationType,
+    topk: usize,
+) -> RustScoredSearchResult {
+    use std::collections::HashMap;
+
+    if results.is_empty() || weights.is_empty() {
+        return RustScoredSearchResult::default();
+    }
+
+    // Aggregate scores by doc_id
+    let mut score_map: HashMap<u32, f32> = HashMap::new();
+
+    for (field_idx, (doc_ids, scores)) in results.into_iter().enumerate() {
+        let weight = weights.get(field_idx).copied().unwrap_or(1.0);
+
+        for (doc_id, score) in doc_ids.into_iter().zip(scores.into_iter()) {
+            let weighted_score = score * weight;
+            
+            let entry = score_map.entry(doc_id).or_insert(0.0);
+            match aggregation {
+                BM25AggregationType::WeightedSum => {
+                    *entry += weighted_score;
+                }
+                BM25AggregationType::Max => {
+                    if weighted_score > *entry {
+                        *entry = weighted_score;
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by score descending
+    let mut results: Vec<(u32, f32)> = score_map.into_iter().collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Take top-k
+    results.truncate(topk);
+
+    let doc_ids: Vec<u32> = results.iter().map(|(id, _)| *id).collect();
+    let scores: Vec<f32> = results.iter().map(|(_, s)| *s).collect();
+
+    RustScoredSearchResult::from_vecs(doc_ids, scores)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, ffi::c_void};
@@ -392,6 +466,88 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::{index_writer::IndexWriterWrapper, util::set_bitset, TantivyIndexVersion};
+
+    use super::{aggregate_multi_field_bm25_results, BM25AggregationType};
+
+    #[test]
+    fn test_multi_field_aggregation_weighted_sum() {
+        // Field 1 results
+        let field1_ids = vec![1, 2, 3];
+        let field1_scores = vec![1.0, 0.8, 0.5];
+
+        // Field 2 results - doc 2 appears in both
+        let field2_ids = vec![2, 4, 5];
+        let field2_scores = vec![0.9, 0.7, 0.3];
+
+        let results = vec![
+            (field1_ids, field1_scores),
+            (field2_ids, field2_scores),
+        ];
+        let weights = vec![1.0, 0.5]; // Field 1 has full weight, field 2 half
+
+        let result = aggregate_multi_field_bm25_results(
+            results,
+            &weights,
+            BM25AggregationType::WeightedSum,
+            10,
+        );
+
+        let doc_ids: Vec<u32> = unsafe {
+            std::slice::from_raw_parts(result.doc_ids, result.len).to_vec()
+        };
+        let scores: Vec<f32> = unsafe {
+            std::slice::from_raw_parts(result.scores, result.len).to_vec()
+        };
+
+        // Doc 2 should have highest score: 0.8 * 1.0 + 0.9 * 0.5 = 1.25
+        assert_eq!(doc_ids[0], 2);
+        assert!((scores[0] - 1.25).abs() < 0.001);
+
+        // Doc 1 should be next: 1.0 * 1.0 = 1.0
+        assert_eq!(doc_ids[1], 1);
+        assert!((scores[1] - 1.0).abs() < 0.001);
+
+        crate::array::free_rust_scored_search_result(result);
+    }
+
+    #[test]
+    fn test_multi_field_aggregation_max() {
+        let field1_ids = vec![1, 2];
+        let field1_scores = vec![1.0, 0.5];
+
+        let field2_ids = vec![1, 2];
+        let field2_scores = vec![0.3, 0.9];
+
+        let results = vec![
+            (field1_ids, field1_scores),
+            (field2_ids, field2_scores),
+        ];
+        let weights = vec![1.0, 1.0];
+
+        let result = aggregate_multi_field_bm25_results(
+            results,
+            &weights,
+            BM25AggregationType::Max,
+            10,
+        );
+
+        let doc_ids: Vec<u32> = unsafe {
+            std::slice::from_raw_parts(result.doc_ids, result.len).to_vec()
+        };
+        let scores: Vec<f32> = unsafe {
+            std::slice::from_raw_parts(result.scores, result.len).to_vec()
+        };
+
+        // Doc 1 should have score max(1.0, 0.3) = 1.0
+        // Doc 2 should have score max(0.5, 0.9) = 0.9
+        assert_eq!(doc_ids[0], 1);
+        assert!((scores[0] - 1.0).abs() < 0.001);
+        assert_eq!(doc_ids[1], 2);
+        assert!((scores[1] - 0.9).abs() < 0.001);
+
+        crate::array::free_rust_scored_search_result(result);
+    }
+
     #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
