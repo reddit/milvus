@@ -229,42 +229,68 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 	elementType := vectorField.ElementType
 
 	var vectorType planpb.VectorType
-	if !typeutil.IsVectorType(dataType) {
-		return nil, fmt.Errorf("field (%s) to search is not of vector data type", vectorFieldName)
-	}
-	switch dataType {
-	case schemapb.DataType_BinaryVector:
-		vectorType = planpb.VectorType_BinaryVector
-	case schemapb.DataType_FloatVector:
-		vectorType = planpb.VectorType_FloatVector
-	case schemapb.DataType_Float16Vector:
-		vectorType = planpb.VectorType_Float16Vector
-	case schemapb.DataType_BFloat16Vector:
-		vectorType = planpb.VectorType_BFloat16Vector
-	case schemapb.DataType_SparseFloatVector:
-		vectorType = planpb.VectorType_SparseFloatVector
-	case schemapb.DataType_Int8Vector:
-		vectorType = planpb.VectorType_Int8Vector
-	case schemapb.DataType_ArrayOfVector:
-		switch elementType {
-		case schemapb.DataType_FloatVector:
-			vectorType = planpb.VectorType_EmbListFloatVector
-		case schemapb.DataType_BinaryVector:
-			vectorType = planpb.VectorType_EmbListBinaryVector
-		case schemapb.DataType_Float16Vector:
-			vectorType = planpb.VectorType_EmbListFloat16Vector
-		case schemapb.DataType_BFloat16Vector:
-			vectorType = planpb.VectorType_EmbListBFloat16Vector
-		case schemapb.DataType_Int8Vector:
-			vectorType = planpb.VectorType_EmbListInt8Vector
-		default:
-			log.Error("Invalid elementType for ArrayOfVector", zap.Any("elementType", elementType))
-			return nil, fmt.Errorf("unsupported element type for ArrayOfVector: %v", elementType)
-		}
 
-	default:
-		log.Error("Invalid dataType", zap.Any("dataType", dataType))
-		return nil, fmt.Errorf("unsupported vector data type: %v", dataType)
+	// Check if this is a TEXT_BM25 search (Tantivy native BM25 on text fields)
+	isTextBM25 := queryInfo != nil && strings.ToUpper(queryInfo.GetMetricType()) == "TEXT_BM25"
+
+	if isTextBM25 {
+		// TEXT_BM25 requires a VarChar field with text indexing
+		if dataType != schemapb.DataType_VarChar {
+			return nil, fmt.Errorf("field (%s) must be VarChar type for TEXT_BM25 search, got %v", vectorFieldName, dataType)
+		}
+		// Check if field has text indexing enabled (enable_match or enable_analyzer)
+		typeParams := vectorField.GetTypeParams()
+		hasTextIndex := false
+		for _, param := range typeParams {
+			if param.Key == "enable_match" || param.Key == "enable_analyzer" {
+				if param.Value == "true" {
+					hasTextIndex = true
+					break
+				}
+			}
+		}
+		if !hasTextIndex {
+			log.Warn("TEXT_BM25 search on field without explicit text indexing", zap.String("field", vectorFieldName))
+			// Allow the search to proceed - the field may still have text indexing from other sources
+		}
+		vectorType = planpb.VectorType_TextBM25
+	} else if !typeutil.IsVectorType(dataType) {
+		return nil, fmt.Errorf("field (%s) to search is not of vector data type", vectorFieldName)
+	} else {
+		switch dataType {
+		case schemapb.DataType_BinaryVector:
+			vectorType = planpb.VectorType_BinaryVector
+		case schemapb.DataType_FloatVector:
+			vectorType = planpb.VectorType_FloatVector
+		case schemapb.DataType_Float16Vector:
+			vectorType = planpb.VectorType_Float16Vector
+		case schemapb.DataType_BFloat16Vector:
+			vectorType = planpb.VectorType_BFloat16Vector
+		case schemapb.DataType_SparseFloatVector:
+			vectorType = planpb.VectorType_SparseFloatVector
+		case schemapb.DataType_Int8Vector:
+			vectorType = planpb.VectorType_Int8Vector
+		case schemapb.DataType_ArrayOfVector:
+			switch elementType {
+			case schemapb.DataType_FloatVector:
+				vectorType = planpb.VectorType_EmbListFloatVector
+			case schemapb.DataType_BinaryVector:
+				vectorType = planpb.VectorType_EmbListBinaryVector
+			case schemapb.DataType_Float16Vector:
+				vectorType = planpb.VectorType_EmbListFloat16Vector
+			case schemapb.DataType_BFloat16Vector:
+				vectorType = planpb.VectorType_EmbListBFloat16Vector
+			case schemapb.DataType_Int8Vector:
+				vectorType = planpb.VectorType_EmbListInt8Vector
+			default:
+				log.Error("Invalid elementType for ArrayOfVector", zap.Any("elementType", elementType))
+				return nil, fmt.Errorf("unsupported element type for ArrayOfVector: %v", elementType)
+			}
+
+		default:
+			log.Error("Invalid dataType", zap.Any("dataType", dataType))
+			return nil, fmt.Errorf("unsupported vector data type: %v", dataType)
+		}
 	}
 
 	scorers, options, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)

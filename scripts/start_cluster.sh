@@ -28,6 +28,8 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   export LD_LIBRARY_PATH=$PWD/internal/core/output/lib/:$LD_LIBRARY_PATH
 fi
 
+export CGO_LDFLAGS='-Wl,-rpath,/Users/amit.kumar/src/reddit-milvus-v2.6.6-patched-tantivy-bm25/cmake_build/lib' && export PKG_CONFIG_PATH='/Users/amit.kumar/src/reddit-milvus-v2.6.6-patched-tantivy-bm25/cmake_build/src:/Users/amit.kumar/src/reddit-milvus-v2.6.6-patched-tantivy-bm25/cmake_build/thirdparty/rocksdb:$PKG_CONFIG_PATH'
+
 echo "Starting mixcoord..."
 nohup ./bin/milvus run mixcoord --run-with-subprocess >/tmp/mixcoord.log 2>&1 &
 

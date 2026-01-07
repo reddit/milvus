@@ -394,6 +394,19 @@ class SegmentInternalInterface : public SegmentInterface {
                   milvus::OpContext* op_context,
                   SearchResult& output) const = 0;
 
+    // TEXT_BM25 search using Tantivy's native BM25 scoring on text fields.
+    // Unlike vector_search which uses Knowhere, this uses TextMatchIndex::BM25SearchQuery.
+    // query_text: the search query string
+    // Returns scored results (seg_offsets, distances/scores)
+    virtual void
+    text_search(SearchInfo& search_info,
+                const std::string& query_text,
+                int64_t query_count,
+                Timestamp timestamp,
+                const BitsetView& bitset,
+                milvus::OpContext* op_context,
+                SearchResult& output) const;
+
     virtual void
     mask_with_delete(BitsetTypeView& bitset,
                      int64_t ins_barrier,

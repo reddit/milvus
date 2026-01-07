@@ -631,6 +631,198 @@ func isRandomSampleExpr(expr *ExprWithType) bool {
 	return expr.expr.GetRandomSampleExpr() != nil
 }
 
+// TextSearchOptions holds parsed text_search configuration
+type TextSearchOptions struct {
+	TopK            int64
+	Weights         []float32
+	Aggregation     planpb.BM25AggregationType
+	Slop            uint32
+	MinShouldMatch  uint32
+}
+
+func (v *ParserVisitor) VisitTextSearch(ctx *parser.TextSearchContext) interface{} {
+	// Parse fields
+	fieldsCtx := ctx.TextSearchFields()
+	var fieldNames []string
+	
+	switch f := fieldsCtx.(type) {
+	case *parser.SingleTextFieldContext:
+		fieldNames = append(fieldNames, f.Identifier().GetText())
+	case *parser.MultiTextFieldContext:
+		for _, id := range f.AllIdentifier() {
+			fieldNames = append(fieldNames, id.GetText())
+		}
+	}
+	
+	// Validate and get field IDs
+	var fieldIDs []int64
+	for _, fieldName := range fieldNames {
+		column, err := v.translateIdentifier(fieldName)
+		if err != nil {
+			return err
+		}
+		columnInfo := toColumnInfo(column)
+		if !typeutil.IsStringType(column.dataType) {
+			return errors.New("text_search operation on non-string field is unsupported")
+		}
+		if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
+			return fmt.Errorf("field \"%s\" does not enable text match", fieldName)
+		}
+		fieldIDs = append(fieldIDs, columnInfo.FieldId)
+	}
+	
+	// Parse query text
+	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+	
+	// Parse options
+	opts := TextSearchOptions{
+		TopK:        10, // default topk
+		Aggregation: planpb.BM25AggregationType_BM25AggWeightedSum,
+	}
+	
+	if ctx.TextSearchOptions() != nil {
+		optResult := ctx.TextSearchOptions().Accept(v)
+		if err, ok := optResult.(error); ok {
+			return err
+		}
+		if parsedOpts, ok := optResult.(*TextSearchOptions); ok {
+			opts = *parsedOpts
+		}
+	}
+	
+	// Validate weights length matches fields
+	if len(opts.Weights) > 0 && len(opts.Weights) != len(fieldIDs) {
+		return fmt.Errorf("weights length (%d) must match number of fields (%d)", len(opts.Weights), len(fieldIDs))
+	}
+	
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_TextSearchExpr{
+				TextSearchExpr: &planpb.TextSearchExpr{
+					FieldIds:       fieldIDs,
+					Query:          queryText,
+					Topk:           opts.TopK,
+					Weights:        opts.Weights,
+					Aggregation:    opts.Aggregation,
+					Slop:           opts.Slop,
+					MinShouldMatch: opts.MinShouldMatch,
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool, // Returns boolean result for filtering
+	}
+}
+
+func (v *ParserVisitor) VisitSingleTextField(ctx *parser.SingleTextFieldContext) interface{} {
+	return ctx.Identifier().GetText()
+}
+
+func (v *ParserVisitor) VisitMultiTextField(ctx *parser.MultiTextFieldContext) interface{} {
+	var fields []string
+	for _, id := range ctx.AllIdentifier() {
+		fields = append(fields, id.GetText())
+	}
+	return fields
+}
+
+func (v *ParserVisitor) VisitTextSearchOptions(ctx *parser.TextSearchOptionsContext) interface{} {
+	opts := &TextSearchOptions{
+		TopK:        10,
+		Aggregation: planpb.BM25AggregationType_BM25AggWeightedSum,
+	}
+	
+	for _, optCtx := range ctx.AllTextSearchOption() {
+		optResult := optCtx.Accept(v)
+		if err, ok := optResult.(error); ok {
+			return err
+		}
+		// Merge the parsed option into opts
+		if parsedOpt, ok := optResult.(*TextSearchOptions); ok {
+			if parsedOpt.TopK > 0 {
+				opts.TopK = parsedOpt.TopK
+			}
+			if len(parsedOpt.Weights) > 0 {
+				opts.Weights = parsedOpt.Weights
+			}
+			if parsedOpt.Aggregation != 0 {
+				opts.Aggregation = parsedOpt.Aggregation
+			}
+			if parsedOpt.Slop > 0 {
+				opts.Slop = parsedOpt.Slop
+			}
+			if parsedOpt.MinShouldMatch > 0 {
+				opts.MinShouldMatch = parsedOpt.MinShouldMatch
+			}
+		}
+	}
+	
+	return opts
+}
+
+func (v *ParserVisitor) VisitTextSearchTopK(ctx *parser.TextSearchTopKContext) interface{} {
+	topkStr := ctx.IntegerConstant().GetText()
+	topk, err := strconv.ParseInt(topkStr, 0, 64)
+	if err != nil {
+		return fmt.Errorf("invalid topk value: %s", topkStr)
+	}
+	if topk <= 0 {
+		return fmt.Errorf("topk must be positive, got: %d", topk)
+	}
+	return &TextSearchOptions{TopK: topk}
+}
+
+func (v *ParserVisitor) VisitTextSearchWeights(ctx *parser.TextSearchWeightsContext) interface{} {
+	var weights []float32
+	for _, fc := range ctx.AllFloatingConstant() {
+		weightStr := fc.GetText()
+		weight, err := strconv.ParseFloat(weightStr, 32)
+		if err != nil {
+			return fmt.Errorf("invalid weight value: %s", weightStr)
+		}
+		weights = append(weights, float32(weight))
+	}
+	return &TextSearchOptions{Weights: weights}
+}
+
+func (v *ParserVisitor) VisitTextSearchAggregation(ctx *parser.TextSearchAggregationContext) interface{} {
+	aggStr, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+	
+	var agg planpb.BM25AggregationType
+	switch strings.ToLower(aggStr) {
+	case "weighted_sum", "weightedsum":
+		agg = planpb.BM25AggregationType_BM25AggWeightedSum
+	case "max":
+		agg = planpb.BM25AggregationType_BM25AggMax
+	default:
+		return fmt.Errorf("invalid aggregation type: %s, must be 'weighted_sum' or 'max'", aggStr)
+	}
+	return &TextSearchOptions{Aggregation: agg}
+}
+
+func (v *ParserVisitor) VisitTextSearchSlop(ctx *parser.TextSearchSlopContext) interface{} {
+	slopStr := ctx.IntegerConstant().GetText()
+	slop, err := strconv.ParseUint(slopStr, 0, 32)
+	if err != nil {
+		return fmt.Errorf("invalid slop value: %s", slopStr)
+	}
+	return &TextSearchOptions{Slop: uint32(slop)}
+}
+
+func (v *ParserVisitor) VisitTextSearchMinShouldMatch(ctx *parser.TextSearchMinShouldMatchContext) interface{} {
+	minStr := ctx.IntegerConstant().GetText()
+	min, err := strconv.ParseUint(minStr, 0, 32)
+	if err != nil {
+		return fmt.Errorf("invalid minimum_should_match value: %s", minStr)
+	}
+	return &TextSearchOptions{MinShouldMatch: uint32(min)}
+}
+
 const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {

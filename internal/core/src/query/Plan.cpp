@@ -82,6 +82,14 @@ ParsePlaceholderGroup(const Plan* plan,
             milvus::proto::common::PlaceholderType::SparseFloatVector) {
             element.sparse_matrix_ =
                 SparseBytesToRows(info.values(), /*validate=*/true);
+        } else if (info.type() ==
+                   milvus::proto::common::PlaceholderType::VarChar) {
+            // TEXT_BM25 search: placeholder contains text query strings
+            // Store them directly without dimension checking
+            auto& target = element.blob_;
+            for (auto& line : info.values()) {
+                target.insert(target.end(), line.begin(), line.end());
+            }
         } else {
             auto line_size = info.values().Get(0).size();
             auto& target = element.blob_;

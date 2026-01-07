@@ -493,6 +493,70 @@ SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
     return std::visit(make_pin, iter->second);
 }
 
+void
+SegmentInternalInterface::text_search(SearchInfo& search_info,
+                                      const std::string& query_text,
+                                      int64_t query_count,
+                                      Timestamp timestamp,
+                                      const BitsetView& bitset,
+                                      milvus::OpContext* op_context,
+                                      SearchResult& output) const {
+    tracer::AutoSpan span("text_search", tracer::GetRootSpan());
+
+    auto field_id = search_info.field_id_;
+    auto topk = search_info.topk_;
+
+    // Get the text index for this field
+    auto pinned_index = GetTextIndex(op_context, field_id);
+    auto text_index = pinned_index.get();
+
+    std::vector<int64_t> seg_offsets;
+    std::vector<float> scores;
+
+    // Use filtered BM25 search if there's a filter, otherwise use unfiltered
+    // This is more efficient than searching and then filtering post-hoc
+    // because Tantivy can skip filtered documents during search.
+    if (!bitset.empty()) {
+        // Pass the bitset to Tantivy for efficient filtered search
+        auto [filtered_offsets, filtered_scores] =
+            text_index->BM25SearchQueryWithFilter(
+                query_text,
+                topk,
+                bitset.data(),
+                bitset.size());
+        seg_offsets = std::move(filtered_offsets);
+        scores = std::move(filtered_scores);
+    } else {
+        // No filter, use regular BM25 search
+        auto [unfiltered_offsets, unfiltered_scores] =
+            text_index->BM25SearchQuery(query_text, topk);
+        seg_offsets = std::move(unfiltered_offsets);
+        scores = std::move(unfiltered_scores);
+    }
+
+    // Populate the search result
+    // The result must have exactly nq * topK elements
+    size_t total_size = static_cast<size_t>(topk) * query_count;
+    size_t result_count = std::min(seg_offsets.size(), static_cast<size_t>(topk));
+
+    output.seg_offsets_.resize(total_size);
+    output.distances_.resize(total_size);
+    output.total_nq_ = query_count;
+    output.unity_topK_ = topk;
+
+    // Copy actual results
+    for (size_t i = 0; i < result_count; ++i) {
+        output.seg_offsets_[i] = seg_offsets[i];
+        output.distances_[i] = scores[i];
+    }
+
+    // Pad remaining slots with -1 (no result) and 0 score
+    for (size_t i = result_count; i < total_size; ++i) {
+        output.seg_offsets_[i] = -1;
+        output.distances_[i] = 0.0f;
+    }
+}
+
 std::unique_ptr<DataArray>
 SegmentInternalInterface::bulk_subscript_not_exist_field(
     const milvus::FieldMeta& field_meta, int64_t count) const {

@@ -565,6 +565,14 @@ IsBinaryVectorMetricType(const MetricType& metric_type) {
            metric_type == knowhere::metric::MAX_SIM_JACCARD;
 }
 
+// TEXT_BM25 metric type constant for Tantivy native BM25 scoring
+constexpr const char* TEXT_BM25_METRIC = "TEXT_BM25";
+
+inline bool
+IsTextSearchMetricType(const MetricType& metric_type) {
+    return metric_type == TEXT_BM25_METRIC;
+}
+
 inline bool
 IsIntVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::L2 ||

@@ -42,6 +42,11 @@ const (
 
 	BM25 MetricType = "BM25"
 
+	// TEXT_BM25 represents BM25 scoring directly from Tantivy text index.
+	// Unlike BM25 which uses sparse vectors via Knowhere, TEXT_BM25 uses
+	// Tantivy's native inverted index for text fields.
+	TEXT_BM25 MetricType = "TEXT_BM25"
+
 	EMPTY MetricType = ""
 
 	// The same with MaxSimCosine
