@@ -88,6 +88,31 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     TargetBitmap
     PhraseMatchQuery(const std::string& query, uint32_t slop);
 
+    /// BM25 scored text search - returns (seg_offsets, scores) pairs.
+    /// Unlike MatchQuery which returns a bitset, this returns scored results
+    /// suitable for ranking.
+    std::pair<std::vector<int64_t>, std::vector<float>>
+    BM25SearchQuery(const std::string& query, int64_t topk);
+
+    /// BM25 scored text search with minimum_should_match parameter.
+    std::pair<std::vector<int64_t>, std::vector<float>>
+    BM25SearchQueryWithMinimum(const std::string& query,
+                               uint32_t min_should_match,
+                               int64_t topk);
+
+    /// BM25 scored phrase search - returns (seg_offsets, scores) pairs.
+    std::pair<std::vector<int64_t>, std::vector<float>>
+    BM25PhraseSearchQuery(const std::string& query, uint32_t slop, int64_t topk);
+
+    /// BM25 scored text search with a filter bitset.
+    /// The filter bitset contains 1 for documents to EXCLUDE.
+    /// This is more efficient than searching and then filtering post-hoc.
+    std::pair<std::vector<int64_t>, std::vector<float>>
+    BM25SearchQueryWithFilter(const std::string& query,
+                               int64_t topk,
+                               const uint8_t* filter_bitset,
+                               size_t filter_bitset_len);
+
  private:
     bool
     shouldTriggerCommit();

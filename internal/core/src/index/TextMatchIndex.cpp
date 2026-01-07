@@ -333,4 +333,99 @@ TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     return bitset;
 }
 
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25SearchQuery(const std::string& query, int64_t topk) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25SearchQuery", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] =
+        wrapper_->bm25_search_query(query, static_cast<uintptr_t>(topk));
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25SearchQueryWithMinimum(const std::string& query,
+                                           uint32_t min_should_match,
+                                           int64_t topk) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25SearchQueryWithMinimum", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] = wrapper_->bm25_search_query_with_minimum(
+        query, min_should_match, static_cast<uintptr_t>(topk));
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25PhraseSearchQuery(const std::string& query,
+                                      uint32_t slop,
+                                      int64_t topk) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25PhraseSearchQuery", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] = wrapper_->bm25_phrase_search_query(
+        query, slop, static_cast<uintptr_t>(topk));
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25SearchQueryWithFilter(const std::string& query,
+                                           int64_t topk,
+                                           const uint8_t* filter_bitset,
+                                           size_t filter_bitset_len) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25SearchQueryWithFilter", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] = wrapper_->bm25_search_query_with_filter(
+        query, static_cast<uintptr_t>(topk), filter_bitset, filter_bitset_len);
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
 }  // namespace milvus::index
