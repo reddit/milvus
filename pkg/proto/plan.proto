@@ -46,6 +46,7 @@ enum VectorType {
   EmbListBFloat16Vector = 8;
   EmbListInt8Vector = 9;
   EmbListBinaryVector = 10;
+  TextBM25 = 11;  // For TEXT_BM25 metric type - uses Tantivy text index directly
 };
 
 message GenericValue {
