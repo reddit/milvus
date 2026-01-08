@@ -174,10 +174,6 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		}
 	} else {
 		stats.initCentroids(data, stats.Type)
-		err = json.Unmarshal(*messageMap["centroids"], &stats.Centroids)
-		if err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -200,7 +196,12 @@ func (stats *FieldStats) initCentroids(data []byte, dataType schemapb.DataType) 
 	for i := 0; i < len(aux.Centroids); i++ {
 		switch dataType {
 		case schemapb.DataType_FloatVector:
-			stats.Centroids = append(stats.Centroids, &FloatVectorFieldValue{})
+			vectorValue := &FloatVectorFieldValue{}
+			if err := vectorValue.UnmarshalJSON(aux.Centroids[i]); err != nil {
+				log.Warn("Failed to unmarshal centroid", zap.Error(err))
+				continue
+			}
+			stats.Centroids = append(stats.Centroids, vectorValue)
 		default:
 			// other vector datatype
 		}
