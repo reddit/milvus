@@ -27,6 +27,10 @@ func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTextSearch(ctx *TextSearchContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -196,5 +200,37 @@ func (v *BasePlanVisitor) VisitSTOverlaps(ctx *STOverlapsContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitTextMatchOption(ctx *TextMatchOptionContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSingleTextField(ctx *SingleTextFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitMultiTextField(ctx *MultiTextFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTextSearchOptions(ctx *TextSearchOptionsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTextSearchTopK(ctx *TextSearchTopKContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTextSearchWeights(ctx *TextSearchWeightsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTextSearchAggregation(ctx *TextSearchAggregationContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTextSearchSlop(ctx *TextSearchSlopContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTextSearchMinShouldMatch(ctx *TextSearchMinShouldMatchContext) interface{} {
 	return v.VisitChildren(ctx)
 }

@@ -1012,8 +1012,8 @@ func (suite *SegmentLoaderSuite) TestLoadLazySegmentSkipsDeltaLogsInitially() {
 	// Create new schema with lazy load enabled
 	newSchema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 	newSchema.Properties = append(newSchema.Properties, &commonpb.KeyValuePair{
-		Key:   "collection.loadType",
-		Value: "lazy",
+		Key:   "lazyload.enabled",
+		Value: "true",
 	})
 
 	suite.manager.Collection.PutOrRef(suite.collectionID, newSchema,

@@ -834,7 +834,62 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
 	}
 
+	// Handle multi-field TEXT_BM25 search: check if annsFieldName contains commas
+	// e.g., "title,selftext" means search both fields
+	var primaryFieldName string
+	if strings.Contains(annsFieldName, ",") && searchInfo.planInfo.GetMetricType() == metric.TEXT_BM25 {
+		fieldNames := strings.Split(annsFieldName, ",")
+		if len(fieldNames) < 2 {
+			return nil, nil, 0, false, errors.New("multi-field TEXT_BM25 search requires at least 2 fields")
+		}
+
+		// First field is the primary field for the plan
+		primaryFieldName = strings.TrimSpace(fieldNames[0])
+
+		// Look up field IDs for additional fields
+		var additionalFieldIDs []string
+		for i := 1; i < len(fieldNames); i++ {
+			fieldName := strings.TrimSpace(fieldNames[i])
+			field := typeutil.GetFieldByName(t.schema.CollectionSchema, fieldName)
+			if field == nil {
+				return nil, nil, 0, false, fmt.Errorf("field '%s' not found in schema for multi-field TEXT_BM25 search", fieldName)
+			}
+			// Verify field has text index enabled (enable_match or enable_analyzer in TypeParams)
+			hasTextIndex := false
+			for _, param := range field.GetTypeParams() {
+				if param.Key == "enable_match" || param.Key == "enable_analyzer" {
+					if strings.ToLower(param.Value) == "true" {
+						hasTextIndex = true
+						break
+					}
+				}
+			}
+			if !hasTextIndex {
+				return nil, nil, 0, false, fmt.Errorf("field '%s' does not have text indexing enabled (enable_match or enable_analyzer)", fieldName)
+			}
+			additionalFieldIDs = append(additionalFieldIDs, strconv.FormatInt(field.GetFieldID(), 10))
+		}
+
+		// Add additional field IDs to search_params
+		// Parse existing search_params, add bm25_field_ids, then serialize back
+		searchInfo.planInfo.SearchParams = addMultiFieldBM25Params(
+			searchInfo.planInfo.SearchParams,
+			additionalFieldIDs,
+			params,
+		)
+
+		log.Ctx(t.ctx).Debug("multi-field TEXT_BM25 search configured",
+			zap.String("primary_field", primaryFieldName),
+			zap.Strings("additional_field_ids", additionalFieldIDs),
+			zap.String("search_params", searchInfo.planInfo.SearchParams))
+
+		annsFieldName = primaryFieldName
+	}
+
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
+	if annField == nil {
+		return nil, nil, 0, false, fmt.Errorf("field '%s' not found in schema", annsFieldName)
+	}
 	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 		return nil, nil, 0, false, errors.New("not support search_group_by operation based on binary vector column")
 	}

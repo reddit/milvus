@@ -313,21 +313,33 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}()
 	}
 
-	searchAgainstBM25Field := sd.isBM25Field[req.GetReq().GetFieldId()]
+	// Check if this is a TEXT_BM25 search (Tantivy native BM25)
+	// TEXT_BM25 searches text fields directly using Tantivy's inverted index
+	// and doesn't need IDF building like sparse vector BM25
+	isTextBM25Search := req.GetReq().GetMetricType() == metric.TEXT_BM25
+	if isTextBM25Search {
+		log.Debug("TEXT_BM25 search detected, using Tantivy native BM25 scoring",
+			zap.Int64("fieldId", req.GetReq().GetFieldId()),
+			zap.String("channel", sd.vchannelName))
+		// TEXT_BM25 doesn't need IDF building - Tantivy handles it internally
+		// The search will be routed to TextMatchIndex::BM25SearchQuery in C++
+	} else {
+		searchAgainstBM25Field := sd.isBM25Field[req.GetReq().GetFieldId()]
 
-	if searchAgainstBM25Field {
-		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
-			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
-		}
-		// build idf for bm25 search
-		avgdl, err := sd.buildBM25IDF(req.GetReq())
-		if err != nil {
-			return nil, err
-		}
+		if searchAgainstBM25Field {
+			if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
+				return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
+			}
+			// build idf for bm25 search
+			avgdl, err := sd.buildBM25IDF(req.GetReq())
+			if err != nil {
+				return nil, err
+			}
 
-		if avgdl <= 0 {
-			log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
-			return []*internalpb.SearchResults{}, nil
+			if avgdl <= 0 {
+				log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
+				return []*internalpb.SearchResults{}, nil
+			}
 		}
 	}
 

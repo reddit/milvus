@@ -98,6 +98,58 @@ pub extern "C" fn free_rust_array_i64(array: RustArrayI64) {
     }
 }
 
+/// Represents a BM25 scored search result with doc_ids and scores.
+/// Used for text_search operations that return relevance scores.
+#[repr(C)]
+pub struct RustScoredSearchResult {
+    pub doc_ids: *mut u32,
+    pub scores: *mut f32,
+    pub len: size_t,
+    pub cap: size_t,
+}
+
+impl RustScoredSearchResult {
+    pub fn from_vecs(doc_ids: Vec<u32>, scores: Vec<f32>) -> RustScoredSearchResult {
+        assert_eq!(doc_ids.len(), scores.len(), "doc_ids and scores must have same length");
+        let len = doc_ids.len();
+        let cap = doc_ids.capacity();
+        let doc_ids_ptr = doc_ids.leak().as_mut_ptr();
+        let scores_ptr = scores.leak().as_mut_ptr();
+        RustScoredSearchResult {
+            doc_ids: doc_ids_ptr,
+            scores: scores_ptr,
+            len,
+            cap,
+        }
+    }
+}
+
+impl std::default::Default for RustScoredSearchResult {
+    fn default() -> Self {
+        RustScoredSearchResult {
+            doc_ids: std::ptr::null_mut(),
+            scores: std::ptr::null_mut(),
+            len: 0,
+            cap: 0,
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn free_rust_scored_search_result(result: RustScoredSearchResult) {
+    let RustScoredSearchResult { doc_ids, scores, len, cap } = result;
+    if !doc_ids.is_null() {
+        unsafe {
+            Vec::from_raw_parts(doc_ids, len, cap);
+        }
+    }
+    if !scores.is_null() {
+        unsafe {
+            Vec::from_raw_parts(scores, len, cap);
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[repr(C)]
 pub enum Value {

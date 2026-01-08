@@ -17,6 +17,7 @@ expr:
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'         # TextMatch
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
+	| TEXTSEARCH'('textSearchFields',' StringLiteral (',' textSearchOptions)? ')'  # TextSearch
 	| RANDOMSAMPLE'(' expr ')'						     						 # RandomSample
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
@@ -53,6 +54,22 @@ expr:
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
 
+// Text search fields - single field or array of fields
+textSearchFields:
+	Identifier                                    # SingleTextField
+	| '[' Identifier (',' Identifier)* ','? ']'   # MultiTextField;
+
+// Text search options for configuring BM25 search
+textSearchOptions:
+	textSearchOption (',' textSearchOption)*;
+
+textSearchOption:
+	TOPK ASSIGN IntegerConstant                    # TextSearchTopK
+	| WEIGHTS ASSIGN '[' FloatingConstant (',' FloatingConstant)* ','? ']'  # TextSearchWeights
+	| AGGREGATION ASSIGN StringLiteral             # TextSearchAggregation
+	| SLOP ASSIGN IntegerConstant                  # TextSearchSlop
+	| MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant  # TextSearchMinShouldMatch;
+
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
 // BOOL: 'bool';
@@ -76,10 +93,15 @@ LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
+TEXTSEARCH: 'text_search'|'TEXT_SEARCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
+TOPK: 'topk' | 'TOPK';
+WEIGHTS: 'weights' | 'WEIGHTS';
+AGGREGATION: 'aggregation' | 'AGGREGATION';
+SLOP: 'slop' | 'SLOP';
 ASSIGN: '=';
 
 ADD: '+';

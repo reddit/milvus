@@ -46,6 +46,30 @@ struct SearchInfo {
     std::optional<std::string> json_path_;
     std::optional<milvus::DataType> json_type_;
     bool strict_cast_{false};
+
+    // Multi-field TEXT_BM25 search support
+    // Additional field IDs for multi-field search (primary field is in field_id_)
+    std::vector<FieldId> additional_field_ids_;
+    // Weights for each field (first weight is for field_id_, rest for additional_field_ids_)
+    std::vector<float> bm25_weights_;
+    // If true, use max aggregation; otherwise use weighted_sum (default)
+    bool bm25_use_max_aggregation_{false};
+
+    // Helper to check if this is a multi-field search
+    bool
+    IsMultiFieldTextSearch() const {
+        return !additional_field_ids_.empty();
+    }
+
+    // Get all field IDs (primary + additional)
+    std::vector<FieldId>
+    GetAllTextFieldIds() const {
+        std::vector<FieldId> all_ids;
+        all_ids.push_back(field_id_);
+        all_ids.insert(
+            all_ids.end(), additional_field_ids_.begin(), additional_field_ids_.end());
+        return all_ids;
+    }
 };
 
 using SearchInfoPtr = std::shared_ptr<SearchInfo>;

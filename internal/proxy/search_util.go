@@ -692,3 +692,48 @@ func getMetricType(toReduceResults []*internalpb.SearchResults) string {
 	}
 	return ""
 }
+
+// addMultiFieldBM25Params adds multi-field TEXT_BM25 parameters to the search_params JSON string.
+// It adds bm25_field_ids (comma-separated additional field IDs), and passes through
+// bm25_weights and bm25_agg from the request params.
+func addMultiFieldBM25Params(searchParams string, additionalFieldIDs []string, params []*commonpb.KeyValuePair) string {
+	// Start with existing params or empty object
+	if searchParams == "" {
+		searchParams = "{}"
+	}
+
+	// Remove trailing "}" to add new fields
+	searchParams = strings.TrimSuffix(searchParams, "}")
+
+	// Build additions
+	var additions []string
+
+	// Add bm25_field_ids (comma-separated additional field IDs)
+	if len(additionalFieldIDs) > 0 {
+		additions = append(additions, fmt.Sprintf(`"bm25_field_ids":"%s"`, strings.Join(additionalFieldIDs, ",")))
+	}
+
+	// Pass through bm25_weights if provided in original params
+	if bm25Weights, err := funcutil.GetAttrByKeyFromRepeatedKV("bm25_weights", params); err == nil && bm25Weights != "" {
+		additions = append(additions, fmt.Sprintf(`"bm25_weights":"%s"`, bm25Weights))
+	}
+
+	// Pass through bm25_agg if provided in original params (weighted_sum or max)
+	if bm25Agg, err := funcutil.GetAttrByKeyFromRepeatedKV("bm25_agg", params); err == nil && bm25Agg != "" {
+		additions = append(additions, fmt.Sprintf(`"bm25_agg":"%s"`, bm25Agg))
+	}
+
+	// Combine additions
+	if len(additions) > 0 {
+		// Check if we need a comma (if there were existing fields)
+		if searchParams != "{" && !strings.HasSuffix(searchParams, "{") {
+			searchParams += ","
+		}
+		searchParams += strings.Join(additions, ",")
+	}
+
+	// Close the JSON object
+	searchParams += "}"
+
+	return searchParams
+}

@@ -16,6 +16,7 @@
 
 #include "VectorSearchNode.h"
 
+#include "common/Types.h"
 #include "monitor/Monitor.h"
 
 namespace milvus {
@@ -85,14 +86,30 @@ PhyVectorSearchNode::GetOutput() {
     milvus::BitsetView final_view((uint8_t*)col_input->GetRawData(),
                                   col_input->size());
     auto op_context = query_context_->get_op_context();
-    segment_->vector_search(search_info_,
-                            src_data,
-                            src_offsets,
-                            num_queries,
-                            query_timestamp_,
-                            final_view,
-                            op_context,
-                            search_result);
+
+    // Check if this is a TEXT_BM25 search (Tantivy native BM25)
+    if (IsTextSearchMetricType(search_info_.metric_type_)) {
+        // TEXT_BM25: Route to text_search using Tantivy's BM25
+        // The placeholder contains the query text as VarChar in blob_
+        std::string query_text(ph.blob_.data(), ph.blob_.size());
+        segment_->text_search(search_info_,
+                              query_text,
+                              num_queries,
+                              query_timestamp_,
+                              final_view,
+                              op_context,
+                              search_result);
+    } else {
+        // Regular vector search
+        segment_->vector_search(search_info_,
+                                src_data,
+                                src_offsets,
+                                num_queries,
+                                query_timestamp_,
+                                final_view,
+                                op_context,
+                                search_result);
+    }
 
     search_result.total_data_cnt_ = final_view.size();
     query_context_->set_search_result(std::move(search_result));

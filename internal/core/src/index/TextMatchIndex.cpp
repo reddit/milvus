@@ -333,4 +333,187 @@ TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     return bitset;
 }
 
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25SearchQuery(const std::string& query, int64_t topk) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25SearchQuery", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] =
+        wrapper_->bm25_search_query(query, static_cast<uintptr_t>(topk));
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25SearchQueryWithMinimum(const std::string& query,
+                                           uint32_t min_should_match,
+                                           int64_t topk) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25SearchQueryWithMinimum", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] = wrapper_->bm25_search_query_with_minimum(
+        query, min_should_match, static_cast<uintptr_t>(topk));
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25PhraseSearchQuery(const std::string& query,
+                                      uint32_t slop,
+                                      int64_t topk) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25PhraseSearchQuery", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] = wrapper_->bm25_phrase_search_query(
+        query, slop, static_cast<uintptr_t>(topk));
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25SearchQueryWithFilter(const std::string& query,
+                                           int64_t topk,
+                                           const uint8_t* filter_bitset,
+                                           size_t filter_bitset_len) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25SearchQueryWithFilter", tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    auto [doc_ids, scores] = wrapper_->bm25_search_query_with_filter(
+        query, static_cast<uintptr_t>(topk), filter_bitset, filter_bitset_len);
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25MultiFieldSearch(const std::vector<TextMatchIndex*>& indexes,
+                                     const std::string& query,
+                                     int64_t topk,
+                                     const std::vector<float>& weights,
+                                     bool use_max_aggregation) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25MultiFieldSearch", tracer::GetRootSpan());
+
+    if (indexes.empty() || weights.empty() || indexes.size() != weights.size()) {
+        return {{}, {}};
+    }
+
+    // Collect wrapper pointers - indexes are expected to be ready for reading
+    std::vector<TantivyIndexWrapper*> wrappers;
+    wrappers.reserve(indexes.size());
+    for (auto* idx : indexes) {
+        if (idx != nullptr && idx->wrapper_ != nullptr) {
+            wrappers.push_back(idx->wrapper_.get());
+        }
+    }
+
+    if (wrappers.empty()) {
+        return {{}, {}};
+    }
+
+    auto aggregation = use_max_aggregation ? BM25AggregationType::Max
+                                           : BM25AggregationType::WeightedSum;
+
+    auto [doc_ids, scores] = TantivyIndexWrapper::bm25_multi_field_search(
+        wrappers, query, static_cast<uintptr_t>(topk), weights, aggregation);
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
+std::pair<std::vector<int64_t>, std::vector<float>>
+TextMatchIndex::BM25MultiFieldSearchWithFilter(
+    const std::vector<TextMatchIndex*>& indexes,
+    const std::string& query,
+    int64_t topk,
+    const std::vector<float>& weights,
+    bool use_max_aggregation,
+    const uint8_t* filter_bitset,
+    size_t filter_bitset_len) {
+    tracer::AutoSpan span(
+        "TextMatchIndex::BM25MultiFieldSearchWithFilter", tracer::GetRootSpan());
+
+    if (indexes.empty() || weights.empty() || indexes.size() != weights.size()) {
+        return {{}, {}};
+    }
+
+    // Collect wrapper pointers - indexes are expected to be ready for reading
+    std::vector<TantivyIndexWrapper*> wrappers;
+    wrappers.reserve(indexes.size());
+    for (auto* idx : indexes) {
+        if (idx != nullptr && idx->wrapper_ != nullptr) {
+            wrappers.push_back(idx->wrapper_.get());
+        }
+    }
+
+    if (wrappers.empty()) {
+        return {{}, {}};
+    }
+
+    auto aggregation = use_max_aggregation ? BM25AggregationType::Max
+                                           : BM25AggregationType::WeightedSum;
+
+    auto [doc_ids, scores] = TantivyIndexWrapper::bm25_multi_field_search_with_filter(
+        wrappers, query, static_cast<uintptr_t>(topk), weights, aggregation,
+        filter_bitset, filter_bitset_len);
+
+    // Convert uint32_t doc_ids to int64_t seg_offsets
+    std::vector<int64_t> seg_offsets;
+    seg_offsets.reserve(doc_ids.size());
+    for (auto doc_id : doc_ids) {
+        seg_offsets.push_back(static_cast<int64_t>(doc_id));
+    }
+
+    return {std::move(seg_offsets), std::move(scores)};
+}
+
 }  // namespace milvus::index
