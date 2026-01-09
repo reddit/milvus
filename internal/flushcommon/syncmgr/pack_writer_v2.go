@@ -174,28 +174,54 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+	// Store metadata from writer after successful write
+	type columnGroupMeta struct {
+		compressedSize   uint64
+		uncompressedSize uint64
+		writtenPath      string
+		writtenRowNum    int64
+	}
+	columnGroupMetas := make(map[int64]columnGroupMeta)
+
+	err = retry.Do(ctx, func() error {
+		w, writeErr := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+		if writeErr != nil {
+			return writeErr
+		}
+		if writeErr = w.Write(rec); writeErr != nil {
+			return writeErr
+		}
+		// close first to get compressed size
+		if writeErr = w.Close(); writeErr != nil {
+			return writeErr
+		}
+		// capture metadata after successful write
+		for _, columnGroup := range columnGroups {
+			columnGroupMetas[columnGroup.GroupID] = columnGroupMeta{
+				compressedSize:   w.GetColumnGroupWrittenCompressed(columnGroup.GroupID),
+				uncompressedSize: w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID),
+				writtenPath:      w.GetWrittenPaths(columnGroup.GroupID),
+				writtenRowNum:    w.GetWrittenRowNum(),
+			}
+		}
+		return nil
+	}, bw.writeRetryOpts...)
 	if err != nil {
 		return nil, err
 	}
-	if err = w.Write(rec); err != nil {
-		return nil, err
-	}
-	// close first to get compressed size
-	if err = w.Close(); err != nil {
-		return nil, err
-	}
+
 	for _, columnGroup := range columnGroups {
 		columnGroupID := columnGroup.GroupID
+		meta := columnGroupMetas[columnGroupID]
 		logs[columnGroupID] = &datapb.FieldBinlog{
 			FieldID:     columnGroupID,
 			ChildFields: columnGroup.Fields,
 			Binlogs: []*datapb.Binlog{
 				{
-					LogSize:       int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
-					MemorySize:    int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
-					LogPath:       w.GetWrittenPaths(columnGroupID),
-					EntriesNum:    w.GetWrittenRowNum(),
+					LogSize:       int64(meta.compressedSize),
+					MemorySize:    int64(meta.uncompressedSize),
+					LogPath:       meta.writtenPath,
+					EntriesNum:    meta.writtenRowNum,
 					TimestampFrom: tsFrom,
 					TimestampTo:   tsTo,
 				},
