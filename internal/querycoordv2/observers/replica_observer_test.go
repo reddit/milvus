@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -43,6 +42,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+
+	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 )
 
 type ReplicaObserverSuite struct {
@@ -50,8 +51,10 @@ type ReplicaObserverSuite struct {
 
 	kv kv.MetaKv
 	// dependency
-	meta    *meta.Meta
-	distMgr *meta.DistributionManager
+	meta      *meta.Meta
+	distMgr   *meta.DistributionManager
+	targetMgr meta.TargetManagerInterface
+	broker    *meta.MockBroker
 
 	nodeMgr  *session.NodeManager
 	observer *ReplicaObserver
@@ -89,9 +92,11 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.broker = meta.NewMockBroker(suite.T())
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
-	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr)
+	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
 	suite.observer.Start()
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
@@ -244,7 +249,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		}
 	})
 	balance.Register(b)
-	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr)
+	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
 	suite.observer.Start()
 
 	ctx := context.Background()
