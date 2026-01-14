@@ -47,10 +47,11 @@ type ReplicaObserver struct {
 	stopOnce  sync.Once
 }
 
-func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager) *ReplicaObserver {
+func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager, targetMgr meta.TargetManagerInterface) *ReplicaObserver {
 	return &ReplicaObserver{
-		meta:    meta,
-		distMgr: distMgr,
+		meta:      meta,
+		distMgr:   distMgr,
+		targetMgr: targetMgr,
 	}
 }
 
@@ -179,6 +180,10 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 		replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			if enableChannelExclusiveMode && !replica.IsChannelExclusiveModeEnabled() {
+				if ob.targetMgr == nil {
+					log.Warn("targetMgr is nil, cannot enable channel exclusive mode")
+					continue
+				}
 				// register channel for enable exclusive mode
 				mutableReplica := replica.CopyForWrite()
 				channels := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTargetFirst)
