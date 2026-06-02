@@ -35,11 +35,14 @@ ifdef disk_index
     use_disk_index = ${disk_index}
 endif
 
+CGO_LDFLAGS := $(shell go env CGO_LDFLAGS) -fno-omit-frame-pointer -g
+CGO_CFLAGS := $(shell go env CGO_CFLAGS) -fno-omit-frame-pointer -g
+
 use_asan = OFF
 ifeq ($(USE_ASAN), ON)
 	use_asan = ${USE_ASAN}
-	CGO_LDFLAGS := $(shell go env CGO_LDFLAGS) -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
-	CGO_CFLAGS := $(shell go env CGO_CFLAGS) -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
+	CGO_LDFLAGS := $(CGO_LDFLAGS) -fno-stack-protector -fno-var-tracking -fsanitize=address
+	CGO_CFLAGS := $(CGO_CFLAGS) -fno-stack-protector -fno-var-tracking -fsanitize=address
 	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),use_asan
 endif
 
