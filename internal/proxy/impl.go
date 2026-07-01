@@ -3137,6 +3137,13 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
+	metrics.ProxySQLatencyGranular.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel,
+		dbName,
+		collectionName,
+	).Observe(float64(searchDur))
+
 	metrics.ProxyCollectionSQLatency.WithLabelValues(
 		nodeID,
 		metrics.SearchLabel,
@@ -3367,6 +3374,13 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
+		nodeID,
+		metrics.HybridSearchLabel,
+		dbName,
+		collectionName,
+	).Observe(float64(searchDur))
+
+	metrics.ProxySQLatencyGranular.WithLabelValues(
 		nodeID,
 		metrics.HybridSearchLabel,
 		dbName,
@@ -3807,6 +3821,13 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		).Observe(float64(span.Milliseconds()))
 
 		metrics.ProxySQLatency.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			queryLabel,
+			request.GetDbName(),
+			request.GetCollectionName(),
+		).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		metrics.ProxySQLatencyGranular.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			queryLabel,
 			request.GetDbName(),

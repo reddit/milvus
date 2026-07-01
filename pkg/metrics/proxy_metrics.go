@@ -78,6 +78,16 @@ var (
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
+	// ProxySQLatencyGranular records search/query latency with custom histogram buckets.
+	ProxySQLatencyGranular = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "sq_latency_granular",
+			Help:      "latency of search or query successfully, with custom histogram buckets",
+			Buckets:   sqLatencyGranularBuckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
+
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
 	// Deprecated, ProxySQLatency instead of it
 	ProxyCollectionSQLatency = prometheus.NewHistogramVec(
@@ -491,6 +501,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyDeleteVectors)
 
 	registry.MustRegister(ProxySQLatency)
+	registry.MustRegister(ProxySQLatencyGranular)
 	registry.MustRegister(ProxyCollectionSQLatency)
 	registry.MustRegister(ProxyMutationLatency)
 	registry.MustRegister(ProxyCollectionMutationLatency)
@@ -577,6 +588,10 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 	})
+	ProxySQLatencyGranular.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
 	ProxyMutationLatency.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -604,6 +619,11 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		collectionName:    collection,
 	})
 	ProxySQLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxySQLatencyGranular.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 		collectionName:    collection,
