@@ -53,3 +53,4 @@ RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/
 
 ENTRYPOINT ["/tini", "--"]
 WORKDIR /milvus/
+
