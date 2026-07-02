@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -78,14 +79,16 @@ var (
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
-	// ProxySQLatencyGranular records search/query latency with custom histogram buckets.
+	// ProxySQLatencyGranular records search/query latency with native histogram buckets.
 	ProxySQLatencyGranular = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "sq_latency_granular",
-			Help:      "latency of search or query successfully, with custom histogram buckets",
-			Buckets:   sqLatencyGranularBuckets,
+			Namespace:                       milvusNamespace,
+			Subsystem:                       typeutil.ProxyRole,
+			Name:                            "sq_latency_granular",
+			Help:                            "latency of search or query successfully, with native histogram buckets",
+			NativeHistogramBucketFactor:     1.1,
+			NativeHistogramMaxBucketNumber:  160,
+			NativeHistogramMinResetDuration: time.Hour,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
