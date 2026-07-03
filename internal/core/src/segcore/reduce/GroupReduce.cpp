@@ -10,6 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "GroupReduce.h"
+#include <numeric>
+
+#include "common/Consts.h"
+#include "fmt/format.h"
 #include "log/Log.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/ReduceUtils.h"
@@ -110,127 +114,79 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
 
 void
 GroupReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
-    //do nothing, for group-by reduce, as we calculate prefix_sum for nq when doing group by and no padding invalid results
-    //so there's no need to filter search_result
+    auto nq = search_result->total_nq_;
+    auto topK = search_result->unity_topK_;
+    AssertInfo(search_result->seg_offsets_.size() == nq * topK,
+               "wrong seg offsets size, size = {}, expected size = {}",
+               search_result->seg_offsets_.size(),
+               nq * topK);
+    AssertInfo(search_result->distances_.size() == nq * topK,
+               "wrong distances size, size = {}, expected size = {}",
+               search_result->distances_.size(),
+               nq * topK);
+    AssertInfo(search_result->group_by_values_.has_value(),
+               "no group by values for search result, group reducer should not "
+               "be called, wrong code");
+    AssertInfo(search_result->group_by_values_.value().size() ==
+                   search_result->seg_offsets_.size(),
+               "Wrong size for group_by_values size before filter:{}, "
+               "not equal to seg_offsets size:{}",
+               search_result->group_by_values_.value().size(),
+               search_result->seg_offsets_.size());
     CheckElementIndicesSize(search_result,
                             search_result->seg_offsets_.size(),
                             "group filter invalid result");
+
+    std::vector<int64_t> real_topks(nq, 0);
+    uint32_t valid_index = 0;
+    auto segment = static_cast<SegmentInterface*>(search_result->segment_);
+    auto& offsets = search_result->seg_offsets_;
+    auto& distances = search_result->distances_;
+    auto& group_by_values = search_result->group_by_values_.value();
+    int segment_row_count = segment->get_row_count();
+
+    for (auto i = 0; i < nq; ++i) {
+        for (auto j = 0; j < topK; ++j) {
+            auto index = i * topK + j;
+            if (offsets[index] == INVALID_SEG_OFFSET) {
+                continue;
+            }
+            AssertInfo(0 <= offsets[index] && offsets[index] < segment_row_count,
+                       fmt::format("invalid offset {}, segment {} with "
+                                   "rows num {}, data or index corruption",
+                                   offsets[index],
+                                   segment->get_segment_id(),
+                                   segment_row_count));
+            if (valid_index != index) {
+                offsets[valid_index] = offsets[index];
+                distances[valid_index] = distances[index];
+                group_by_values[valid_index] = std::move(group_by_values[index]);
+                if (search_result->element_level_) {
+                    search_result->element_indices_[valid_index] =
+                        search_result->element_indices_[index];
+                }
+            }
+            valid_index++;
+            real_topks[i]++;
+        }
+    }
+    offsets.resize(valid_index);
+    distances.resize(valid_index);
+    group_by_values.resize(valid_index);
+    if (search_result->element_level_) {
+        search_result->element_indices_.resize(valid_index);
+    }
+    search_result->topk_per_nq_prefix_sum_.resize(nq + 1);
+    std::partial_sum(real_topks.begin(),
+                     real_topks.end(),
+                     search_result->topk_per_nq_prefix_sum_.begin() + 1);
 }
 
 int64_t
 GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                                               int64_t topk,
                                               int64_t& offset) {
-    std::priority_queue<SearchResultPair*,
-                        std::vector<SearchResultPair*>,
-                        SearchResultPairComparator>
-        heap;
-    pk_set_.clear();
-    element_result_set_.clear();
-    pairs_.clear();
-    pairs_.reserve(num_segments_);
-    for (int i = 0; i < num_segments_; i++) {
-        auto search_result = search_results_[i];
-        auto offset_beg = search_result->topk_per_nq_prefix_sum_[qi];
-        auto offset_end = search_result->topk_per_nq_prefix_sum_[qi + 1];
-        if (offset_beg == offset_end) {
-            continue;
-        }
-        auto primary_key = search_result->primary_keys_[offset_beg];
-        auto distance = search_result->distances_[offset_beg];
-        AssertInfo(search_result->group_by_values_.has_value(),
-                   "Wrong state, search_result has no group_by_vales for "
-                   "group_by_reduce, must be sth wrong!");
-        AssertInfo(search_result->group_by_values_.value().size() ==
-                       search_result->primary_keys_.size(),
-                   "Wrong state, search_result's group_by_values's length is "
-                   "not equal to pks' size!");
-        auto group_by_val = search_result->group_by_values_.value()[offset_beg];
-        pairs_.emplace_back(primary_key,
-                            distance,
-                            search_result,
-                            i,
-                            offset_beg,
-                            offset_end,
-                            std::move(group_by_val));
-        heap.push(&pairs_.back());
-    }
-
-    // nq has no results for all segments
-    if (heap.size() == 0) {
-        return 0;
-    }
-
-    int64_t group_size = search_results_[0]->group_size_.value();
-    int64_t group_by_total_size = group_size * topk;
-    int64_t filtered_count = 0;
-    auto start = offset;
-    std::unordered_map<GroupByValueType, int64_t> group_by_map;
-
-    auto should_filtered = [&](const SearchResultPair& result,
-                               const GroupByValueType& group_by_val) {
-        auto search_result = result.search_result_;
-        ElementSearchResultKey element_key{result.primary_key_, -1};
-        if (search_result->element_level_) {
-            AssertInfo(result.offset_ >= 0 &&
-                           static_cast<size_t>(result.offset_) <
-                               search_result->element_indices_.size(),
-                       "invalid element-level search result offset {}, "
-                       "element_indices size {}",
-                       result.offset_,
-                       search_result->element_indices_.size());
-            element_key.element_index =
-                search_result->element_indices_[result.offset_];
-            if (element_result_set_.count(element_key) != 0) {
-                return true;
-            }
-        } else if (pk_set_.count(result.primary_key_) != 0) {
-            return true;
-        }
-
-        auto [it, inserted] = group_by_map.try_emplace(group_by_val, 0);
-        if (inserted && static_cast<int64_t>(group_by_map.size()) > topk) {
-            group_by_map.erase(it);
-            return true;
-        }
-        if (it->second >= group_size) {
-            return true;
-        }
-        it->second += 1;
-        if (search_result->element_level_) {
-            element_result_set_.insert(std::move(element_key));
-        } else {
-            pk_set_.insert(result.primary_key_);
-        }
-        return false;
-    };
-
-    while (offset - start < group_by_total_size && !heap.empty()) {
-        //fetch value
-        auto pilot = heap.top();
-        heap.pop();
-        auto index = pilot->segment_index_;
-        auto pk = pilot->primary_key_;
-        AssertInfo(pk != INVALID_PK,
-                   "Wrong, search results should have been filtered and "
-                   "invalid_pk should not be existed");
-        auto group_by_val = pilot->group_by_value_.value();
-
-        //judge filter
-        if (!should_filtered(*pilot, group_by_val)) {
-            pilot->search_result_->result_offsets_.push_back(offset++);
-            final_search_records_[index][qi].push_back(pilot->offset_);
-        } else {
-            filtered_count++;
-        }
-
-        //move pilot forward
-        pilot->advance();
-        if (pilot->primary_key_ != INVALID_PK) {
-            heap.push(pilot);
-        }
-    }
-    return filtered_count;
+    return ReduceHelper::ReduceSearchResultForOneNQ(qi, topk, offset);
 }
 
 }  // namespace milvus::segcore

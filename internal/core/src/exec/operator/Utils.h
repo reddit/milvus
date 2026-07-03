@@ -33,8 +33,7 @@ namespace exec {
 
 static bool
 UseVectorIterator(const SearchInfo& search_info) {
-    return search_info.group_by_field_id_.has_value() ||
-           search_info.iterative_filter_execution;
+    return search_info.iterative_filter_execution;
 }
 
 static bool
