@@ -33,8 +33,16 @@ namespace exec {
 
 static bool
 UseVectorIterator(const SearchInfo& search_info) {
-    return search_info.group_by_field_id_.has_value() ||
-           search_info.iterative_filter_execution;
+    if (search_info.iterative_filter_execution) {
+        return true;
+    }
+    // Default group-by uses vector iterators at core. Proxy-side refill disables
+    // this path and handles incomplete groups with follow-up searches instead.
+    if (search_info.group_by_field_id_.has_value() &&
+        !search_info.proxy_group_by_refill_) {
+        return true;
+    }
+    return false;
 }
 
 static bool

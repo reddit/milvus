@@ -15,10 +15,14 @@
 // limitations under the License.
 
 #include "GroupByNode.h"
+#include <numeric>
+
 #include "common/Tracer.h"
 #include "fmt/format.h"
 
+#include "exec/operator/Utils.h"
 #include "exec/operator/groupby/SearchGroupByOperator.h"
+#include "log/Log.h"
 #include "monitor/Monitor.h"
 namespace milvus {
 namespace exec {
@@ -66,7 +70,8 @@ PhyGroupByNode::GetOutput() {
 
     auto op_context = query_context_->get_op_context();
     auto search_result = query_context_->get_search_result();
-    if (search_result.vector_iterators_.has_value()) {
+    if (UseVectorIterator(search_info_) &&
+        search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
                        search_result.total_nq_,
                    "Vector Iterators' count must be equal to total_nq_, Check "
@@ -88,6 +93,24 @@ PhyGroupByNode::GetOutput() {
                    "equal to search_result.seg_offsets.size:{}",
                    search_result.group_by_values_.value().size(),
                    search_result.seg_offsets_.size());
+    } else {
+        std::vector<GroupByValueType> group_by_values;
+        milvus::exec::PopulateGroupByValues(op_context,
+                                            search_info_,
+                                            group_by_values,
+                                            *segment_,
+                                            search_result.seg_offsets_);
+        search_result.group_by_values_ = std::move(group_by_values);
+        search_result.group_size_ = search_info_.group_size_;
+        if (search_result.topk_per_nq_prefix_sum_.empty()) {
+            std::vector<size_t> topks(search_result.total_nq_,
+                                      search_result.unity_topK_);
+            search_result.topk_per_nq_prefix_sum_.resize(
+                search_result.total_nq_ + 1);
+            std::partial_sum(topks.begin(),
+                             topks.end(),
+                             search_result.topk_per_nq_prefix_sum_.begin() + 1);
+        }
     }
     tracer::AddEvent(
         fmt::format("grouped_results: {}", search_result.seg_offsets_.size()));

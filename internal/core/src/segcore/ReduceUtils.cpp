@@ -138,9 +138,13 @@ AssembleGroupByValues(
                 mutable_group_by_field_value->set_type(
                     milvus::proto::schema::DataType::VarChar);
                 auto field_data = group_by_res_values->mutable_string_data();
+                auto mutable_data = field_data->mutable_data();
+                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                    mutable_data->Add();
+                }
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
                     if (group_by_vals[idx].has_value()) {
-                        *(field_data->mutable_data()->Add()) =
+                        *mutable_data->Mutable(idx) =
                             std::get<std::string>(group_by_vals[idx].value());
                     } else {
                         valid_data->Set(idx, false);
@@ -152,9 +156,13 @@ AssembleGroupByValues(
                 mutable_group_by_field_value->set_type(
                     milvus::proto::schema::DataType::Geometry);
                 auto field_data = group_by_res_values->mutable_geometry_data();
+                auto mutable_data = field_data->mutable_data();
+                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                    mutable_data->Add();
+                }
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
                     if (group_by_vals[idx].has_value()) {
-                        *(field_data->mutable_data()->Add()) =
+                        *mutable_data->Mutable(idx) =
                             std::get<std::string>(group_by_vals[idx].value());
                     } else {
                         valid_data->Set(idx, false);
@@ -269,10 +277,15 @@ AssembleGroupByValues(
                             milvus::proto::schema::DataType::VarChar);
                         auto field_data =
                             group_by_res_values->mutable_string_data();
+                        auto mutable_data = field_data->mutable_data();
+                        for (std::size_t idx = 0; idx < group_by_val_size;
+                             idx++) {
+                            mutable_data->Add();
+                        }
                         for (std::size_t idx = 0; idx < group_by_val_size;
                              idx++) {
                             if (group_by_vals[idx].has_value()) {
-                                *(field_data->mutable_data()->Add()) =
+                                *mutable_data->Mutable(idx) =
                                     std::get<std::string>(
                                         group_by_vals[idx].value());
                             } else {

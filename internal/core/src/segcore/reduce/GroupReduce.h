@@ -50,9 +50,6 @@ class GroupReduceHelper : public ReduceHelper {
                   int64_t nq_end,
                   std::unique_ptr<milvus::proto::schema::SearchResultData>&
                       search_res_data) override;
-
- private:
-    std::unordered_set<milvus::GroupByValueType> group_by_val_set_{};
 };
 
 }  // namespace milvus::segcore

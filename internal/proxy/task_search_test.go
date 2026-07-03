@@ -61,6 +61,254 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func TestGroupByRefillAnalyzeAndFilterPlan(t *testing.T) {
+	pkField := &schemapb.FieldSchema{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	groupField := &schemapb.FieldSchema{Name: "group", FieldID: 101, DataType: schemapb.DataType_VarChar}
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:             1,
+			Topk:           2,
+			Offset:         0,
+			MetricType:     metric.L2,
+			GroupByFieldId: 101,
+			GroupSize:      2,
+		},
+		schema: newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{pkField, groupField},
+		}),
+		queryInfos: []*planpb.QueryInfo{{GroupByFieldId: 101, GroupSize: 2, StrictGroupSize: true}},
+	}
+	results := &schemapb.SearchResultData{
+		NumQueries: 1,
+		Topks:      []int64{3},
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+		}},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type: schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "a", "b"}}},
+			}},
+		},
+	}
+
+	state, err := task.analyzeGroupByRefill(results)
+	require.NoError(t, err)
+	require.False(t, state.complete)
+	require.NotNil(t, state.selectedPKExpr)
+	require.NotNil(t, state.fullGroupExpr)
+
+	plan := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
+		QueryInfo: &planpb.QueryInfo{GroupByFieldId: 101, GroupSize: 2},
+	}}}
+	serializedPlan, err := proto.Marshal(plan)
+	require.NoError(t, err)
+	task.SearchRequest.SerializedExprPlan = serializedPlan
+	refillReq, err := task.buildGroupByRefillSearchRequest(task.SearchRequest, state)
+	require.NoError(t, err)
+
+	refillPlan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(refillReq.GetSerializedExprPlan(), refillPlan))
+	require.NotNil(t, refillPlan.GetVectorAnns().GetPredicates())
+	require.NotNil(t, refillPlan.GetVectorAnns().GetPredicates().GetBinaryExpr())
+}
+
+func TestGroupByRefillAnalyzeNonStrictComplete(t *testing.T) {
+	pkField := &schemapb.FieldSchema{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	groupField := &schemapb.FieldSchema{Name: "group", FieldID: 101, DataType: schemapb.DataType_Int64}
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:             1,
+			Topk:           2,
+			Offset:         0,
+			GroupByFieldId: 101,
+			GroupSize:      3,
+		},
+		schema: newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{pkField, groupField},
+		}),
+		queryInfos: []*planpb.QueryInfo{{GroupByFieldId: 101, GroupSize: 3, StrictGroupSize: false}},
+	}
+	results := &schemapb.SearchResultData{
+		NumQueries: 1,
+		Topks:      []int64{2},
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+		}},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
+			}},
+		},
+	}
+
+	state, err := task.analyzeGroupByRefill(results)
+	require.NoError(t, err)
+	require.True(t, state.complete)
+	require.NotNil(t, state.selectedPKExpr)
+	require.Nil(t, state.fullGroupExpr)
+}
+
+func TestGroupByRefillAnalyzeRequiresGroupsForOffset(t *testing.T) {
+	pkField := &schemapb.FieldSchema{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	groupField := &schemapb.FieldSchema{Name: "group", FieldID: 101, DataType: schemapb.DataType_Int64}
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:             1,
+			Topk:           3, // user limit 2 + offset 1
+			Offset:         1,
+			GroupByFieldId: 101,
+			GroupSize:      1,
+		},
+		schema: newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{pkField, groupField},
+		}),
+		queryInfos: []*planpb.QueryInfo{{GroupByFieldId: 101, GroupSize: 1}},
+	}
+	tests := []struct {
+		name        string
+		groupValues []int64
+		complete    bool
+	}{
+		{name: "visible limit without offset group", groupValues: []int64{10, 20}, complete: false},
+		{name: "visible limit plus offset group", groupValues: []int64{10, 20, 30}, complete: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ids := make([]int64, len(test.groupValues))
+			for i := range ids {
+				ids[i] = int64(i + 1)
+			}
+			results := &schemapb.SearchResultData{
+				NumQueries: 1,
+				Topks:      []int64{int64(len(ids))},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: ids},
+				}},
+				GroupByFieldValue: &schemapb.FieldData{
+					Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: test.groupValues}},
+					}},
+				},
+			}
+
+			state, err := task.analyzeGroupByRefill(results)
+			require.NoError(t, err)
+			require.Equal(t, test.complete, state.complete)
+			require.Equal(t, len(ids), state.selectedCount)
+		})
+	}
+}
+
+func TestGroupByRefillAnalyzeStrictCompletion(t *testing.T) {
+	pkField := &schemapb.FieldSchema{Name: "id", FieldID: 100, DataType: schemapb.DataType_VarChar, IsPrimaryKey: true}
+	groupField := &schemapb.FieldSchema{Name: "group", FieldID: 101, DataType: schemapb.DataType_Bool}
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:             1,
+			Topk:           2,
+			GroupByFieldId: 101,
+			GroupSize:      2,
+		},
+		schema: newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{pkField, groupField},
+		}),
+		queryInfos: []*planpb.QueryInfo{{GroupByFieldId: 101, GroupSize: 2, StrictGroupSize: true}},
+	}
+
+	results := &schemapb.SearchResultData{
+		NumQueries: 1,
+		Topks:      []int64{4},
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{Data: []string{"pk1", "pk2", "pk3", "pk4"}},
+		}},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type: schemapb.DataType_Bool,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true, true, false, false}}},
+			}},
+		},
+	}
+
+	state, err := task.analyzeGroupByRefill(results)
+	require.NoError(t, err)
+	require.True(t, state.complete)
+	require.Equal(t, 4, state.selectedCount)
+	require.NotNil(t, state.selectedPKExpr)
+	require.NotNil(t, state.fullGroupExpr)
+}
+
+func TestGroupByRefillAnalyzeEmptyResults(t *testing.T) {
+	task := &searchTask{}
+
+	state, err := task.analyzeGroupByRefill(nil)
+	require.NoError(t, err)
+	require.False(t, state.complete)
+	require.Zero(t, state.selectedCount)
+	require.Nil(t, state.selectedPKExpr)
+	require.Nil(t, state.fullGroupExpr)
+}
+
+func TestGroupByRefillOption(t *testing.T) {
+	t.Run("parse option", func(t *testing.T) {
+		enabled, err := isGroupByRefillEnabled(nil)
+		require.NoError(t, err)
+		require.False(t, enabled)
+
+		enabled, err = isGroupByRefillEnabled([]*commonpb.KeyValuePair{{Key: GroupByRefillKey, Value: ""}})
+		require.NoError(t, err)
+		require.False(t, enabled)
+
+		enabled, err = isGroupByRefillEnabled([]*commonpb.KeyValuePair{{Key: GroupByRefillKey, Value: "false"}})
+		require.NoError(t, err)
+		require.False(t, enabled)
+
+		enabled, err = isGroupByRefillEnabled([]*commonpb.KeyValuePair{{Key: GroupByRefillKey, Value: "true"}})
+		require.NoError(t, err)
+		require.True(t, enabled)
+
+		enabled, err = isGroupByRefillEnabled([]*commonpb.KeyValuePair{{Key: ParamsKey, Value: `{"group_by_refill":true}`}})
+		require.NoError(t, err)
+		require.True(t, enabled)
+
+		enabled, err = isGroupByRefillEnabled([]*commonpb.KeyValuePair{{Key: ParamsKey, Value: `{"group_by_refill":"false"}`}})
+		require.NoError(t, err)
+		require.False(t, enabled)
+
+		enabled, err = isGroupByRefillEnabled([]*commonpb.KeyValuePair{{Key: ParamsKey, Value: `{"group_by_refill":"invalid"}`}})
+		require.Error(t, err)
+		require.False(t, enabled)
+
+		enabled, err = isGroupByRefillEnabled([]*commonpb.KeyValuePair{{Key: GroupByRefillKey, Value: "invalid"}})
+		require.Error(t, err)
+		require.False(t, enabled)
+	})
+
+	t.Run("gate refill execution", func(t *testing.T) {
+		task := &searchTask{
+			SearchRequest: &internalpb.SearchRequest{
+				GroupByFieldId: 101,
+				Nq:             1,
+			},
+			queryInfos: []*planpb.QueryInfo{{GroupByFieldId: 101}},
+		}
+		require.False(t, task.shouldRunGroupByRefill())
+
+		task.enableGroupByRefill = true
+		require.True(t, task.shouldRunGroupByRefill())
+
+		task.IsAdvanced = true
+		require.False(t, task.shouldRunGroupByRefill())
+
+		task.IsAdvanced = false
+		task.Nq = 2
+		require.False(t, task.shouldRunGroupByRefill())
+	})
+}
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 
