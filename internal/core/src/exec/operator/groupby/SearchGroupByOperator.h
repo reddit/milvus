@@ -325,6 +325,13 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<float>& distances,
               std::vector<size_t>& topk_per_nq_prefix_sum);
 
+void
+PopulateGroupByValues(milvus::OpContext* op_ctx,
+                      const SearchInfo& searchInfo,
+                      std::vector<GroupByValueType>& group_by_values,
+                      const segcore::SegmentInternalInterface& segment,
+                      const std::vector<int64_t>& seg_offsets);
+
 template <typename T>
 void
 GroupIteratorsByType(

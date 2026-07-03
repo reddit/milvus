@@ -72,7 +72,6 @@ case "${unameOut}" in
       export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
       export CXXFLAGS=${CFLAGS}
       export LDFLAGS="-L$(brew --prefix libomp)/lib"
-
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
       export DYLD_LIBRARY_PATH=$ROOT_DIR/cmake_build/lib:$ROOT_DIR/internal/core/output/lib
       export RPATH="$ROOT_DIR/cmake_build/lib -r $ROOT_DIR/internal/core/output/lib";;

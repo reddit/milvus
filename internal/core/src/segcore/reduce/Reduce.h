@@ -132,9 +132,6 @@ class ReduceHelper {
     void
     FillEntryData();
 
-    bool
-    TryAcceptSearchResult(const SearchResultPair& result);
-
     std::pair<std::vector<char>, StorageCost>
     GetSearchResultDataSlice(const int slice_index,
                              const StorageCost& total_cost);
@@ -155,6 +152,10 @@ class ReduceHelper {
     std::unordered_set<milvus::PkType> pk_set_;
     std::unordered_set<ElementSearchResultKey, ElementSearchResultKeyHash>
         element_result_set_;
+
+    bool
+    TryAcceptSearchResult(const SearchResultPair& result);
+
     // dim0: num_segments_; dim1: total_nq_; dim2: offset
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     std::vector<int64_t> slice_nqs_;
