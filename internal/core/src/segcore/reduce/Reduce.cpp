@@ -99,6 +99,13 @@ ReduceHelper::CheckElementIndicesSize(const SearchResult* search_result,
 
 void
 ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
+    CompactSearchResult(search_result);
+}
+
+void
+ReduceHelper::CompactSearchResult(
+    SearchResult* search_result,
+    std::vector<GroupByValueType>* companion_values) {
     auto nq = search_result->total_nq_;
     auto topK = search_result->unity_topK_;
     AssertInfo(search_result->seg_offsets_.size() == nq * topK,
@@ -117,6 +124,13 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     auto& offsets = search_result->seg_offsets_;
     auto& distances = search_result->distances_;
 
+    if (companion_values != nullptr) {
+        AssertInfo(companion_values->size() == offsets.size(),
+                   "wrong companion values size, size = {}, expected size = {}",
+                   companion_values->size(),
+                   offsets.size());
+    }
+
     int segment_row_count = segment->get_row_count();
     //1. for sealed segment, segment_row_count will not change as delete records will take effect as bitset
     //2. for growing segment, segment_row_count is the minimum position acknowledged, which will only increase after
@@ -133,11 +147,17 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
                                 segment->get_segment_id(),
                                 segment_row_count));
                 real_topks[i]++;
-                offsets[valid_index] = offsets[index];
-                distances[valid_index] = distances[index];
-                if (search_result->element_level_) {
-                    search_result->element_indices_[valid_index] =
-                        search_result->element_indices_[index];
+                if (valid_index != index) {
+                    offsets[valid_index] = offsets[index];
+                    distances[valid_index] = distances[index];
+                    if (companion_values != nullptr) {
+                        (*companion_values)[valid_index] =
+                            std::move((*companion_values)[index]);
+                    }
+                    if (search_result->element_level_) {
+                        search_result->element_indices_[valid_index] =
+                            search_result->element_indices_[index];
+                    }
                 }
                 valid_index++;
             }
@@ -145,6 +165,9 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     }
     offsets.resize(valid_index);
     distances.resize(valid_index);
+    if (companion_values != nullptr) {
+        companion_values->resize(valid_index);
+    }
     if (search_result->element_level_) {
         search_result->element_indices_.resize(valid_index);
     }

@@ -91,6 +91,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             }
         }
 
+        search_info.proxy_group_by_refill_ = query_info_proto.group_by_refill();
+
         if (query_info_proto.bm25_avgdl() > 0) {
             search_info.search_params_[knowhere::meta::BM25_AVGDL] =
                 query_info_proto.bm25_avgdl();

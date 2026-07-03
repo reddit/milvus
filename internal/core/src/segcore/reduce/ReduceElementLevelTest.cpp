@@ -162,6 +162,35 @@ TEST(ReduceElementLevel, GroupReduceRejectsMismatchedElementIndices) {
     EXPECT_ANY_THROW(helper.FilterInvalidSearchResult(&seg0));
 }
 
+TEST(ReduceElementLevel, GroupReduceAcceptsCompactIteratorResult) {
+    SearchResult seg0;
+    seg0.total_nq_ = 1;
+    seg0.unity_topK_ = 3;
+    seg0.topk_per_nq_prefix_sum_ = {0, 1};
+    seg0.distances_ = {0.99f};
+    seg0.seg_offsets_ = {INVALID_SEG_OFFSET};
+    seg0.group_by_values_ = std::vector<GroupByValueType>{
+        MakeInt64GroupValue(7),
+    };
+
+    std::vector<SearchResult*> search_results{&seg0};
+    std::vector<int64_t> slice_nqs{1};
+    std::vector<int64_t> slice_topks{3};
+    TestGroupReduceHelper helper(search_results,
+                                 nullptr,
+                                 slice_nqs.data(),
+                                 slice_topks.data(),
+                                 slice_nqs.size(),
+                                 nullptr);
+
+    EXPECT_NO_THROW(helper.FilterInvalidSearchResult(&seg0));
+    EXPECT_EQ(seg0.topk_per_nq_prefix_sum_, std::vector<size_t>({0, 1}));
+    EXPECT_EQ(seg0.seg_offsets_, std::vector<int64_t>({INVALID_SEG_OFFSET}));
+    EXPECT_EQ(seg0.distances_, std::vector<float>({0.99f}));
+    ASSERT_TRUE(seg0.group_by_values_.has_value());
+    EXPECT_EQ(seg0.group_by_values_.value().size(), 1);
+}
+
 TEST(ReduceElementLevel, GroupReduceKeepsDistinctElementHitsWithSamePK) {
     auto seg0 = MakeElementLevelSearchResult();
     seg0.group_size_ = 2;
