@@ -53,9 +53,10 @@ const (
 	// If the number of estimated search results exceeds this threshold,
 	// a second query request will be initiated to retrieve output fields data.
 	// In this case, the first search will not return any output field from QueryNodes.
-	requeryThreshold = 0.5 * 1024 * 1024
-	radiusKey        = "radius"
-	rangeFilterKey   = "range_filter"
+	requeryThreshold       = 0.5 * 1024 * 1024
+	radiusKey              = "radius"
+	rangeFilterKey         = "range_filter"
+	maxGroupByRefillRounds = 3
 )
 
 // type requery func(span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error)
@@ -874,6 +875,9 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
+	if t.shouldRunGroupByRefill() {
+		return t.executeGroupByRefill(ctx)
+	}
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
 		CollectionID:   t.CollectionID,
@@ -889,6 +893,78 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	log.Debug("Search Execute done.",
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
+	return nil
+}
+
+func (t *searchTask) shouldRunGroupByRefill() bool {
+	return !t.GetIsAdvanced() && t.GroupByFieldId > 0 && len(t.queryInfos) == 1 && t.queryInfos[0] != nil
+}
+
+func (t *searchTask) executeGroupByRefill(ctx context.Context) error {
+	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()), zap.Int64("groupByFieldID", t.GroupByFieldId))
+	originalReq := typeutil.Clone(t.SearchRequest)
+	accumulated := typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+	previousSelectedCount := 0
+
+	for round := 0; round <= maxGroupByRefillRounds; round++ {
+		passBuf := typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+		t.resultBuf = passBuf
+		if err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+			Db:             t.request.GetDbName(),
+			CollectionID:   t.CollectionID,
+			CollectionName: t.collectionName,
+			Nq:             t.Nq,
+			Exec:           t.searchShard,
+		}); err != nil {
+			t.SearchRequest = originalReq
+			t.resultBuf = accumulated
+			log.Warn("group-by refill search pass failed", zap.Int("round", round), zap.Error(err))
+			return errors.Wrap(err, "failed to search")
+		}
+
+		passCount := 0
+		passBuf.Range(func(res *internalpb.SearchResults) bool {
+			accumulated.Insert(res)
+			passCount++
+			return true
+		})
+		t.resultBuf = accumulated
+
+		toReduceResults, err := t.collectSearchResults(ctx)
+		if err != nil {
+			t.SearchRequest = originalReq
+			return err
+		}
+		reduced, err := t.reduceGroupByRefillResults(ctx, toReduceResults)
+		if err != nil {
+			t.SearchRequest = originalReq
+			return err
+		}
+		state, err := t.analyzeGroupByRefill(reduced.GetResults())
+		if err != nil {
+			t.SearchRequest = originalReq
+			return err
+		}
+		noProgress := round > 0 && state.selectedCount <= previousSelectedCount
+		if state.complete || passCount == 0 || noProgress || round == maxGroupByRefillRounds {
+			log.Debug("group-by refill finished",
+				zap.Int("round", round),
+				zap.Bool("complete", state.complete),
+				zap.Bool("noProgress", noProgress),
+				zap.Int("passResultCount", passCount),
+				zap.Int("selectedCount", state.selectedCount))
+			t.SearchRequest = originalReq
+			return nil
+		}
+		previousSelectedCount = state.selectedCount
+		refillReq, err := t.buildGroupByRefillSearchRequest(originalReq, state)
+		if err != nil {
+			t.SearchRequest = originalReq
+			return err
+		}
+		t.SearchRequest = refillReq
+	}
+	t.SearchRequest = originalReq
 	return nil
 }
 
@@ -908,6 +984,179 @@ func getLastBound(result *milvuspb.SearchResults, incomingLastBound *float32, me
 		return math.MaxFloat32
 	}
 	return -math.MaxFloat32
+}
+
+type groupByRefillState struct {
+	complete       bool
+	selectedCount  int
+	selectedPKExpr *planpb.Expr
+	fullGroupExpr  *planpb.Expr
+}
+
+func (t *searchTask) reduceGroupByRefillResults(ctx context.Context, toReduceResults []*internalpb.SearchResults) (*milvuspb.SearchResults, error) {
+	primaryFieldSchema, err := t.schema.GetPkField()
+	if err != nil {
+		return nil, err
+	}
+	return reduceResults(
+		ctx,
+		toReduceResults,
+		t.GetNq(),
+		t.GetTopk(),
+		t.GetOffset(),
+		t.GetMetricType(),
+		primaryFieldSchema.GetDataType(),
+		t.queryInfos[0],
+		false,
+		t.GetCollectionID(),
+		t.GetPartitionIDs())
+}
+
+func (t *searchTask) analyzeGroupByRefill(results *schemapb.SearchResultData) (*groupByRefillState, error) {
+	state := &groupByRefillState{complete: true}
+	if results == nil || results.GetGroupByFieldValue() == nil {
+		state.complete = false
+		return state, nil
+	}
+	pkField, err := t.schema.GetPkField()
+	if err != nil {
+		return nil, err
+	}
+	groupField := typeutil.GetFieldByID(t.schema.CollectionSchema, t.GroupByFieldId)
+	if groupField == nil {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("group by field %d not found", t.GroupByFieldId))
+	}
+
+	pkValues := make([]*planpb.GenericValue, 0, typeutil.GetSizeOfIDs(results.GetIds()))
+	groupValues := typeutil.GetDataIterator(results.GetGroupByFieldValue())
+	groupTermValues := make([]*planpb.GenericValue, 0)
+	limit := t.GetTopk() - t.GetOffset()
+	offset := int64(0)
+	for qi, topk := range results.GetTopks() {
+		groupCounts := make(map[interface{}]int64)
+		for i := int64(0); i < topk; i++ {
+			idx := offset + i
+			pkVal, err := genericValueFromPK(results.GetIds(), int(idx), pkField.GetDataType())
+			if err != nil {
+				return nil, err
+			}
+			pkValues = append(pkValues, pkVal)
+			state.selectedCount++
+			groupCounts[groupValues(int(idx))]++
+		}
+		if int64(len(groupCounts)) < limit {
+			state.complete = false
+		}
+		if t.queryInfos[0].GetStrictGroupSize() {
+			for _, count := range groupCounts {
+				if count < t.GroupSize {
+					state.complete = false
+					break
+				}
+			}
+		}
+		for group, count := range groupCounts {
+			if count >= t.GroupSize {
+				if value, ok := genericValueFromAny(group, results.GetGroupByFieldValue().GetType()); ok {
+					groupTermValues = append(groupTermValues, value)
+				}
+			}
+		}
+		offset += topk
+		if int64(qi+1) >= t.GetNq() {
+			break
+		}
+	}
+	state.selectedPKExpr = notInExpr(pkField, pkValues)
+	state.fullGroupExpr = notInExpr(groupField, groupTermValues)
+	return state, nil
+}
+
+func genericValueFromPK(ids *schemapb.IDs, idx int, dataType schemapb.DataType) (*planpb.GenericValue, error) {
+	switch dataType {
+	case schemapb.DataType_Int64:
+		return &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: ids.GetIntId().GetData()[idx]}}, nil
+	case schemapb.DataType_VarChar:
+		return &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: ids.GetStrId().GetData()[idx]}}, nil
+	default:
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported primary key type %s for group-by refill", dataType.String()))
+	}
+}
+
+func genericValueFromAny(value any, dataType schemapb.DataType) (*planpb.GenericValue, bool) {
+	switch dataType {
+	case schemapb.DataType_Bool:
+		v, ok := value.(bool)
+		return &planpb.GenericValue{Val: &planpb.GenericValue_BoolVal{BoolVal: v}}, ok
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		v, ok := value.(int32)
+		if ok {
+			return &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: int64(v)}}, true
+		}
+		i, ok := value.(int)
+		return &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: int64(i)}}, ok
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+		v, ok := value.(int64)
+		return &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: v}}, ok
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		v, ok := value.(string)
+		return &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: v}}, ok
+	default:
+		return nil, false
+	}
+}
+
+func notInExpr(field *schemapb.FieldSchema, values []*planpb.GenericValue) *planpb.Expr {
+	if len(values) == 0 || field == nil {
+		return nil
+	}
+	term := &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+		ColumnInfo: &planpb.ColumnInfo{
+			FieldId:      field.GetFieldID(),
+			DataType:     field.GetDataType(),
+			IsPrimaryKey: field.GetIsPrimaryKey(),
+			Nullable:     field.GetNullable(),
+		},
+		Values: values,
+	}}}
+	return &planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{
+		Op:    planpb.UnaryExpr_Not,
+		Child: term,
+	}}}
+}
+
+func andExpr(left, right *planpb.Expr) *planpb.Expr {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	return &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+		Op:    planpb.BinaryExpr_LogicalAnd,
+		Left:  left,
+		Right: right,
+	}}}
+}
+
+func (t *searchTask) buildGroupByRefillSearchRequest(originalReq *internalpb.SearchRequest, state *groupByRefillState) (*internalpb.SearchRequest, error) {
+	refillReq := typeutil.Clone(originalReq)
+	plan := &planpb.PlanNode{}
+	if err := proto.Unmarshal(originalReq.GetSerializedExprPlan(), plan); err != nil {
+		return nil, err
+	}
+	vectorPlan := plan.GetVectorAnns()
+	if vectorPlan == nil {
+		return nil, merr.WrapErrServiceInternal("group-by refill requires vector search plan")
+	}
+	refillFilter := andExpr(state.selectedPKExpr, state.fullGroupExpr)
+	vectorPlan.Predicates = andExpr(vectorPlan.GetPredicates(), refillFilter)
+	serializedPlan, err := proto.Marshal(plan)
+	if err != nil {
+		return nil, err
+	}
+	refillReq.SerializedExprPlan = serializedPlan
+	return refillReq, nil
 }
 
 func (t *searchTask) PostExecute(ctx context.Context) error {

@@ -317,6 +317,183 @@ SearchGroupBy(milvus::OpContext* op_ctx,
 }
 
 template <typename T>
+static void
+PopulateGroupByValuesByType(const std::shared_ptr<DataGetter<T>>& data_getter,
+                            std::vector<GroupByValueType>& group_by_values,
+                            const std::vector<int64_t>& seg_offsets) {
+    group_by_values.reserve(seg_offsets.size());
+    for (const auto offset : seg_offsets) {
+        group_by_values.emplace_back(data_getter->Get(offset));
+    }
+}
+
+void
+PopulateGroupByValues(milvus::OpContext* op_ctx,
+                      const SearchInfo& search_info,
+                      std::vector<GroupByValueType>& group_by_values,
+                      const segcore::SegmentInternalInterface& segment,
+                      const std::vector<int64_t>& seg_offsets) {
+    FieldId group_by_field_id = search_info.group_by_field_id_.value();
+    auto data_type = segment.GetFieldDataType(group_by_field_id);
+    switch (data_type) {
+        case DataType::INT8: {
+            PopulateGroupByValuesByType<int8_t>(
+                GetDataGetter<int8_t>(op_ctx, segment, group_by_field_id),
+                group_by_values,
+                seg_offsets);
+            break;
+        }
+        case DataType::INT16: {
+            PopulateGroupByValuesByType<int16_t>(
+                GetDataGetter<int16_t>(op_ctx, segment, group_by_field_id),
+                group_by_values,
+                seg_offsets);
+            break;
+        }
+        case DataType::INT32: {
+            PopulateGroupByValuesByType<int32_t>(
+                GetDataGetter<int32_t>(op_ctx, segment, group_by_field_id),
+                group_by_values,
+                seg_offsets);
+            break;
+        }
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ: {
+            PopulateGroupByValuesByType<int64_t>(
+                GetDataGetter<int64_t>(op_ctx, segment, group_by_field_id),
+                group_by_values,
+                seg_offsets);
+            break;
+        }
+        case DataType::BOOL: {
+            PopulateGroupByValuesByType<bool>(
+                GetDataGetter<bool>(op_ctx, segment, group_by_field_id),
+                group_by_values,
+                seg_offsets);
+            break;
+        }
+        case DataType::VARCHAR: {
+            PopulateGroupByValuesByType<std::string>(
+                GetDataGetter<std::string>(op_ctx, segment, group_by_field_id),
+                group_by_values,
+                seg_offsets);
+            break;
+        }
+        case DataType::JSON: {
+            AssertInfo(search_info.json_path_.has_value(),
+                       "json_path is required for json field when doing "
+                       "search_group_by");
+            if (search_info.json_type_.has_value()) {
+                switch (search_info.json_type_.value()) {
+                    case DataType::BOOL: {
+                        PopulateGroupByValuesByType<bool>(
+                            GetDataGetter<bool, milvus::Json>(
+                                op_ctx,
+                                segment,
+                                group_by_field_id,
+                                search_info.json_path_,
+                                search_info.json_type_,
+                                search_info.strict_cast_),
+                            group_by_values,
+                            seg_offsets);
+                        break;
+                    }
+                    case DataType::INT8: {
+                        PopulateGroupByValuesByType<int8_t>(
+                            GetDataGetter<int8_t, milvus::Json>(
+                                op_ctx,
+                                segment,
+                                group_by_field_id,
+                                search_info.json_path_,
+                                search_info.json_type_,
+                                search_info.strict_cast_),
+                            group_by_values,
+                            seg_offsets);
+                        break;
+                    }
+                    case DataType::INT16: {
+                        PopulateGroupByValuesByType<int16_t>(
+                            GetDataGetter<int16_t, milvus::Json>(
+                                op_ctx,
+                                segment,
+                                group_by_field_id,
+                                search_info.json_path_,
+                                search_info.json_type_,
+                                search_info.strict_cast_),
+                            group_by_values,
+                            seg_offsets);
+                        break;
+                    }
+                    case DataType::INT32: {
+                        PopulateGroupByValuesByType<int32_t>(
+                            GetDataGetter<int32_t, milvus::Json>(
+                                op_ctx,
+                                segment,
+                                group_by_field_id,
+                                search_info.json_path_,
+                                search_info.json_type_,
+                                search_info.strict_cast_),
+                            group_by_values,
+                            seg_offsets);
+                        break;
+                    }
+                    case DataType::INT64: {
+                        PopulateGroupByValuesByType<int64_t>(
+                            GetDataGetter<int64_t, milvus::Json>(
+                                op_ctx,
+                                segment,
+                                group_by_field_id,
+                                search_info.json_path_,
+                                search_info.json_type_,
+                                search_info.strict_cast_),
+                            group_by_values,
+                            seg_offsets);
+                        break;
+                    }
+                    case DataType::VARCHAR: {
+                        PopulateGroupByValuesByType<std::string>(
+                            GetDataGetter<std::string, milvus::Json>(
+                                op_ctx,
+                                segment,
+                                group_by_field_id,
+                                search_info.json_path_,
+                                search_info.json_type_,
+                                search_info.strict_cast_),
+                            group_by_values,
+                            seg_offsets);
+                        break;
+                    }
+                    default: {
+                        ThrowInfo(Unsupported,
+                                  fmt::format("unsupported data type {} for "
+                                              "group by operator",
+                                              data_type));
+                    }
+                }
+            } else {
+                PopulateGroupByValuesByType<std::string>(
+                    GetDataGetter<std::string, milvus::Json>(
+                        op_ctx,
+                        segment,
+                        group_by_field_id,
+                        search_info.json_path_,
+                        search_info.json_type_,
+                        search_info.strict_cast_),
+                    group_by_values,
+                    seg_offsets);
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                Unsupported,
+                fmt::format("unsupported data type {} for group by operator",
+                            data_type));
+        }
+    }
+}
+
+template <typename T>
 void
 GroupIteratorsByType(
     const std::vector<std::shared_ptr<VectorIterator>>& iterators,

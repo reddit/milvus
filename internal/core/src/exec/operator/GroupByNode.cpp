@@ -88,6 +88,15 @@ PhyGroupByNode::GetOutput() {
                    "equal to search_result.seg_offsets.size:{}",
                    search_result.group_by_values_.value().size(),
                    search_result.seg_offsets_.size());
+    } else {
+        std::vector<GroupByValueType> group_by_values;
+        milvus::exec::PopulateGroupByValues(op_context,
+                                            search_info_,
+                                            group_by_values,
+                                            *segment_,
+                                            search_result.seg_offsets_);
+        search_result.group_by_values_ = std::move(group_by_values);
+        search_result.group_size_ = search_info_.group_size_;
     }
     tracer::AddEvent(
         fmt::format("grouped_results: {}", search_result.seg_offsets_.size()));
