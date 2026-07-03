@@ -21,6 +21,7 @@ set -e
 
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
+set -e
 
 if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0
