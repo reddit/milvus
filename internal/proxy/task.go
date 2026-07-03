@@ -61,6 +61,7 @@ const (
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
 	StrictGroupSize      = "strict_group_size"
+	GroupByRefillKey     = "group_by_refill"
 	JSONPath             = "json_path"
 	JSONType             = "json_type"
 	StrictCastKey        = "strict_cast"
