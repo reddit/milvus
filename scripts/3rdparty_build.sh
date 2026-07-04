@@ -26,12 +26,14 @@ usage() {
   echo "Usage: $0 [-o BUILD_OPENDAL] [-t BUILD_TYPE] [-h]"
   echo "  -o BUILD_OPENDAL  Enable/disable OpenDAL build (ON/OFF, default: OFF)"
   echo "  -t BUILD_TYPE     Set build type (Debug/Release/RelWithDebInfo/MinSizeRel, default: Release)"
+  echo "  CONAN_ONLY=1      Only run conan install and skip CMake thirdparty targets"
   echo "  -h                Show this help message"
   echo ""
   echo "Examples:"
   echo "  $0                          # Build with default settings (Release, OpenDAL OFF)"
   echo "  $0 -t Debug                 # Build in Debug mode"
   echo "  $0 -o ON -t RelWithDebInfo  # Build with OpenDAL enabled and RelWithDebInfo"
+  echo "  CONAN_ONLY=1 $0             # Warm only Conan dependencies"
 }
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -182,6 +184,10 @@ fi
 
 
 popd
+
+if [[ ${CONAN_ONLY:-0} -eq 1 ]]; then
+  exit 0
+fi
 
 mkdir -p ${ROOT_DIR}/internal/core/output/lib
 mkdir -p ${ROOT_DIR}/internal/core/output/include

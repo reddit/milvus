@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1.7
+
+ARG TARGETARCH
+ARG MILVUS_ENV_IMAGE=artifactory.build.ue1.snooguts.net/reddit-docker-dev/milvusdb/milvus-env:ubuntu22.04-20251231-67e4a21
+
+FROM ${MILVUS_ENV_IMAGE}
+
+ARG TARGETARCH
+
+SHELL ["/bin/bash", "-c"]
+
+WORKDIR /workspace/milvus
+
+COPY scripts/setenv.sh scripts/
+COPY scripts/3rdparty_build.sh scripts/
+COPY internal/core/conanfile.py internal/core/
+
+ENV TARGETARCH=${TARGETARCH}
+ENV GOARCH=${TARGETARCH}
+
+RUN CONAN_ONLY=1 bash scripts/3rdparty_build.sh -t Release
