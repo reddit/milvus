@@ -14,7 +14,7 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION "hieu/v2.6.15-knowhere-metrics" )
+set( KNOWHERE_VERSION "nathan/disable-hnsw-bf-v2.6.15" )
 set( GIT_REPOSITORY  "https://github.com/reddit/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
