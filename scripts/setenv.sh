@@ -75,7 +75,7 @@ case "${unameOut}" in
 
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
       export DYLD_LIBRARY_PATH=$ROOT_DIR/cmake_build/lib:$ROOT_DIR/internal/core/output/lib
-      export RPATH=$DYLD_LIBRARY_PATH;;
+      export RPATH="$ROOT_DIR/cmake_build/lib -r $ROOT_DIR/internal/core/output/lib";;
     MINGW*)
       extra_path=$(cygpath -w "$ROOT_DIR/internal/core/output/lib")
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH};${extra_path}\pkgconfig"
@@ -84,4 +84,3 @@ case "${unameOut}" in
     *)
       echo "does not supported"
 esac
-
