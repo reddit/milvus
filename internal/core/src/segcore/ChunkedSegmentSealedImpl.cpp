@@ -848,6 +848,13 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
 }
 
 void
+ChunkedSegmentSealedImpl::mask_with_delete(RoaringBitmapVector& bitset,
+                                           int64_t ins_barrier,
+                                           Timestamp timestamp) const {
+    deleted_record_.Query(bitset, ins_barrier, timestamp);
+}
+
+void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
                                         const size_t* query_offsets,
@@ -2514,6 +2521,55 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
     auto mask = TimestampIndex::GenerateBitset(
         timestamp, range, timestamps_data, timestamps_data_size);
     bitset_chunk |= mask;
+}
+
+void
+ChunkedSegmentSealedImpl::mask_with_timestamps(
+    RoaringBitmapVector& bitset_chunk,
+    Timestamp timestamp,
+    Timestamp collection_ttl) const {
+    AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
+               "num chunk not equal to 1 for sealed segment");
+    auto timestamps_data =
+        (const milvus::Timestamp*)insert_record_.timestamps_.get_chunk_data(0);
+    auto timestamps_data_size = insert_record_.timestamps_.get_chunk_size(0);
+    if (collection_ttl > 0) {
+        auto range =
+            insert_record_.timestamp_index_.get_active_range(collection_ttl);
+        if (range.first == range.second &&
+            range.first == timestamps_data_size) {
+            bitset_chunk.SetAll();
+            return;
+        }
+
+        bitset_chunk.AddRange(0, range.first);
+        for (int64_t i = range.first; i < range.second; ++i) {
+            if (timestamps_data[i] <= collection_ttl) {
+                bitset_chunk.Add(i);
+            }
+        }
+    }
+
+    AssertInfo(timestamps_data_size == get_row_count(),
+               fmt::format("Timestamp size not equal to row count: {}, {}",
+                           timestamps_data_size,
+                           get_row_count()));
+    auto range = insert_record_.timestamp_index_.get_active_range(timestamp);
+
+    if (range.first == range.second && range.first == timestamps_data_size) {
+        return;
+    }
+    if (range.first == range.second && range.first == 0) {
+        bitset_chunk.SetAll();
+        return;
+    }
+
+    bitset_chunk.AddRange(range.second, timestamps_data_size);
+    for (int64_t i = range.first; i < range.second; ++i) {
+        if (timestamps_data[i] > timestamp) {
+            bitset_chunk.Add(i);
+        }
+    }
 }
 
 bool
