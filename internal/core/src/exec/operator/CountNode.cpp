@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "CountNode.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/Tracer.h"
 #include "fmt/format.h"
 namespace milvus {
@@ -60,11 +61,20 @@ PhyCountNode::GetOutput() {
         return nullptr;
     }
     tracer::AutoSpan span("PhyCountNode::Execute", tracer::GetRootSpan(), true);
-    auto col_input = GetColumnVector(input_);
-    TargetBitmapView view(col_input->GetRawData(), col_input->size());
-    auto cnt = view.size() - view.count();
+    auto cnt = int64_t{0};
+    auto size = int64_t{0};
+    if (auto roaring_input =
+            std::dynamic_pointer_cast<RoaringBitmapVector>(input_->child(0))) {
+        size = roaring_input->size();
+        cnt = size - roaring_input->count();
+    } else {
+        auto col_input = GetColumnVector(input_);
+        TargetBitmapView view(col_input->GetRawData(), col_input->size());
+        size = view.size();
+        cnt = size - view.count();
+    }
     query_context_->set_retrieve_result(
-        std::move(*(wrap_num_entities(cnt, view.size()))));
+        std::move(*(wrap_num_entities(cnt, size))));
     is_finished_ = true;
 
     tracer::AddEvent(fmt::format("count_result: {}", cnt));

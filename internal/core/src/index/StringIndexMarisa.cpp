@@ -130,22 +130,22 @@ StringIndexMarisa::Build(const Config& config) {
     if (built_) {
         ThrowInfo(IndexAlreadyBuild, "index has been built");
     }
-    auto field_datas = storage::CacheRawDataAndFillMissing(
+    auto field_data = storage::CacheRawDataAndFillMissing(
         std::static_pointer_cast<storage::MemFileManagerImpl>(
             this->file_manager_),
         config);
 
-    BuildWithFieldData(field_datas);
+    BuildWithFieldData(field_data);
 }
 
 void
 StringIndexMarisa::BuildWithFieldData(
-    const std::vector<FieldDataPtr>& field_datas) {
+    const std::vector<FieldDataPtr>& field_data) {
     int64_t total_num_rows = 0;
 
     // fill key set.
     marisa::Keyset keyset;
-    for (const auto& data : field_datas) {
+    for (const auto& data : field_data) {
         auto slice_num = data->get_num_rows();
         for (int64_t i = 0; i < slice_num; ++i) {
             if (data->is_valid(i)) {
@@ -161,7 +161,7 @@ StringIndexMarisa::BuildWithFieldData(
     // fill str_ids_
     str_ids_.resize(total_num_rows, MARISA_NULL_KEY_ID);
     int64_t offset = 0;
-    for (const auto& data : field_datas) {
+    for (const auto& data : field_data) {
         auto slice_num = data->get_num_rows();
         for (int64_t i = 0; i < slice_num; ++i) {
             if (data->is_valid(i)) {
@@ -313,12 +313,12 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas = this->file_manager_->LoadIndexToMemory(
+    auto index_data = this->file_manager_->LoadIndexToMemory(
         index_files.value(), load_priority);
     BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
-    // clear index_datas to free memory early
-    index_datas.clear();
+    AssembleIndexDatas(index_data, binary_set);
+    // clear index_data to free memory early
+    index_data.clear();
     LoadWithoutAssemble(binary_set, config);
 }
 
@@ -337,6 +337,25 @@ StringIndexMarisa::In(size_t n, const std::string* values) {
         }
     }
     return bitset;
+}
+
+RoaringBitmapVectorPtr
+StringIndexMarisa::InRoaring(size_t n, const std::string* values) {
+    tracer::AutoSpan span("StringIndexMarisa::InRoaring",
+                          tracer::GetRootSpan());
+    auto res =
+        std::make_shared<RoaringBitmapVector>(str_ids_.size(), IsNotNull());
+    for (size_t i = 0; i < n; i++) {
+        const auto& str = values[i];
+        auto str_id = lookup(str);
+        if (valid_str_id(str_id)) {
+            auto& offsets = str_ids_to_offsets_[str_id];
+            for (auto offset : offsets) {
+                res->Add(offset);
+            }
+        }
+    }
+    return res;
 }
 
 const TargetBitmap

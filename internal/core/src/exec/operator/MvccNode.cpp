@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "MvccNode.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/Tracer.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
@@ -23,6 +24,26 @@
 #include "segcore/SegmentInterface.h"
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        auto child = row->child(0);
+        if (auto roaring =
+                std::dynamic_pointer_cast<RoaringBitmapVector>(child)) {
+            return roaring;
+        }
+    }
+
+    return nullptr;
+}
+
+}  // namespace
 
 PhyMvccNode::PhyMvccNode(int32_t operator_id,
                          DriverContext* driverctx,
@@ -78,32 +99,46 @@ PhyMvccNode::GetOutput() {
     if (is_source_node_ && segment_->type() == SegmentType::Sealed &&
         collection_ttl_timestamp_ == 0 &&
         query_timestamp_ >= segment_->get_max_timestamp()) {
-        auto col_input = std::make_shared<ColumnVector>(
-            TargetBitmap(active_count_), TargetBitmap(active_count_));
-        TargetBitmapView data(col_input->GetRawData(), col_input->size());
-        segment_->mask_with_delete(data, active_count_, query_timestamp_);
+        auto roaring_input =
+            std::make_shared<RoaringBitmapVector>(active_count_, true);
+        segment_->mask_with_delete(
+            *roaring_input, active_count_, query_timestamp_);
 
-        if (data.none()) {
+        if (roaring_input->count() == 0) {
             query_context->set_all_rows_visible(true);
         }
 
         is_finished_ = true;
-        return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+        return std::make_shared<RowVector>(
+            std::vector<VectorPtr>{std::move(roaring_input)});
     }
 
-    // Default path (has filter / growing / TTL)
-    auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
-                                           TargetBitmap(active_count_),
-                                           TargetBitmap(active_count_))
-                                     : GetColumnVector(input_);
+    if (!is_source_node_) {
+        if (auto roaring_input = GetRoaringBitmapVector(input_)) {
+            segment_->mask_with_timestamps(
+                *roaring_input, query_timestamp_, collection_ttl_timestamp_);
+            segment_->mask_with_delete(
+                *roaring_input, active_count_, query_timestamp_);
+            is_finished_ = true;
+            return std::make_shared<RowVector>(
+                std::vector<VectorPtr>{std::move(roaring_input)});
+        }
+    }
 
-    TargetBitmapView data(col_input->GetRawData(), col_input->size());
+    auto roaring_input =
+        std::make_shared<RoaringBitmapVector>(active_count_, true);
+    if (!is_source_node_) {
+        auto col_input = GetColumnVector(input_);
+        TargetBitmapView data(col_input->GetRawData(), col_input->size());
+        roaring_input->OrShifted(data, 0);
+    }
     segment_->mask_with_timestamps(
-        data, query_timestamp_, collection_ttl_timestamp_);
-    segment_->mask_with_delete(data, active_count_, query_timestamp_);
+        *roaring_input, query_timestamp_, collection_ttl_timestamp_);
+    segment_->mask_with_delete(*roaring_input, active_count_, query_timestamp_);
     is_finished_ = true;
 
-    return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+    return std::make_shared<RowVector>(
+        std::vector<VectorPtr>{std::move(roaring_input)});
 }
 
 bool

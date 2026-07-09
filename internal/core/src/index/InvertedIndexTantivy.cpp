@@ -111,6 +111,9 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
 
 template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
+    if (roaring_wrapper_) {
+        roaring_wrapper_->free();
+    }
     if (wrapper_) {
         wrapper_->free();
     }
@@ -195,9 +198,9 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
 template <typename T>
 void
 InvertedIndexTantivy<T>::Build(const Config& config) {
-    auto field_datas = storage::CacheRawDataAndFillMissing(
+    auto field_data = storage::CacheRawDataAndFillMissing(
         std::static_pointer_cast<MemFileManager>(this->file_manager_), config);
-    BuildWithFieldData(field_datas);
+    BuildWithFieldData(field_data);
 }
 
 template <typename T>
@@ -222,7 +225,11 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+        prefix.c_str(), load_in_mmap, GetSetBitsetFn());
+    if (!load_in_mmap) {
+        roaring_wrapper_ = std::make_shared<TantivyIndexWrapper>(
+            prefix.c_str(), load_in_mmap, milvus::index::SetBitsetRoaring);
+    }
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -252,10 +259,10 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
 
     if (null_offset_file_itr != index_files.end()) {
         // null offset file is not sliced
-        auto index_datas = this->file_manager_->LoadIndexToMemory(
+        auto index_data = this->file_manager_->LoadIndexToMemory(
             {*null_offset_file_itr}, load_priority);
         auto null_offset_data =
-            std::move(index_datas.at(INDEX_NULL_OFFSET_FILE_NAME));
+            std::move(index_data.at(INDEX_NULL_OFFSET_FILE_NAME));
         fill_null_offsets(null_offset_data->PayloadData(),
                           null_offset_data->PayloadSize());
         return;
@@ -278,12 +285,12 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
                    "null offset slices found but _meta_slice is missing");
         null_offset_files.push_back(slice_meta_file.value());
         // null offset file is sliced
-        auto index_datas = this->file_manager_->LoadIndexToMemory(
+        auto index_data = this->file_manager_->LoadIndexToMemory(
             null_offset_files, load_priority);
 
-        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto slice_meta = std::move(index_data.at(INDEX_FILE_SLICE_META));
         auto null_offsets_data_codecs = CompactIndexDatasByKey(
-            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
+            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_data);
         AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
                    "null offset file is empty");
         auto null_offsets_codec =
@@ -291,6 +298,12 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         fill_null_offsets(null_offsets_codec->PayloadData(),
                           null_offsets_codec->PayloadSize());
     }
+}
+
+template <typename T>
+SetBitsetFn
+InvertedIndexTantivy<T>::GetSetBitsetFn() const {
+    return milvus::index::SetBitsetSealed;
 }
 
 template <typename T>
@@ -316,11 +329,42 @@ InvertedIndexTantivy<T>::RetainTantivyIndexFiles(
 }
 
 template <typename T>
+TantivyIndexWrapper*
+InvertedIndexTantivy<T>::GetRoaringWrapper() {
+    if (roaring_wrapper_) {
+        return roaring_wrapper_.get();
+    }
+
+    AssertInfo(!path_.empty(), "failed to create roaring reader: empty path");
+    AssertInfo(tantivy_index_exist(path_.c_str()),
+               "failed to create roaring reader: tantivy index path {} does "
+               "not exist",
+               path_);
+    roaring_wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        path_.c_str(), true, milvus::index::SetBitsetRoaring);
+    return roaring_wrapper_.get();
+}
+
+template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
     tracer::AutoSpan span("InvertedIndexTantivy::In", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
     wrapper_->terms_query(values, n, &bitset);
+    return bitset;
+}
+
+template <typename T>
+RoaringBitmapVectorPtr
+InvertedIndexTantivy<T>::InRoaring(size_t n, const T* values) {
+    tracer::AutoSpan span("InvertedIndexTantivy::InRoaring",
+                          tracer::GetRootSpan());
+    auto count = Count();
+    auto bitset =
+        null_offset_.empty()
+            ? std::make_shared<RoaringBitmapVector>(count)
+            : std::make_shared<RoaringBitmapVector>(count, IsNotNull());
+    GetRoaringWrapper()->terms_query(values, n, bitset.get());
     return bitset;
 }
 
@@ -363,6 +407,33 @@ InvertedIndexTantivy<T>::IsNotNull() {
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
         for (auto iter = null_offset_.begin(); iter != end; ++iter) {
             bitset.reset(*iter);
+        }
+    };
+
+    if (is_growing_) {
+        std::shared_lock<folly::SharedMutex> lock(mutex_);
+        fill_bitset();
+    } else {
+        fill_bitset();
+    }
+
+    return bitset;
+}
+
+template <typename T>
+RoaringBitmapVectorPtr
+InvertedIndexTantivy<T>::IsNotNullRoaring() {
+    tracer::AutoSpan span("InvertedIndexTantivy::IsNotNullRoaring",
+                          tracer::GetRootSpan());
+    int64_t count = Count();
+    auto bitset = std::make_shared<RoaringBitmapVector>(count);
+    bitset->SetAll();
+
+    auto fill_bitset = [this, count, &bitset]() {
+        auto end =
+            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+            bitset->Remove(*iter);
         }
     };
 
@@ -430,6 +501,16 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
 }
 
 template <typename T>
+RoaringBitmapVectorPtr
+InvertedIndexTantivy<T>::NotInRoaring(size_t n, const T* values) {
+    tracer::AutoSpan span("InvertedIndexTantivy::NotInRoaring",
+                          tracer::GetRootSpan());
+    auto bitset = InRoaring(n, values);
+    bitset->Flip();
+    return bitset;
+}
+
+template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::Range(const T& value, OpType op) {
     tracer::AutoSpan span("InvertedIndexTantivy::Range", tracer::GetRootSpan());
@@ -457,6 +538,42 @@ InvertedIndexTantivy<T>::Range(const T& value, OpType op) {
 }
 
 template <typename T>
+RoaringBitmapVectorPtr
+InvertedIndexTantivy<T>::RangeRoaring(const T& value, OpType op) {
+    tracer::AutoSpan span("InvertedIndexTantivy::RangeRoaring",
+                          tracer::GetRootSpan());
+    auto count = Count();
+    auto bitset =
+        null_offset_.empty()
+            ? std::make_shared<RoaringBitmapVector>(count)
+            : std::make_shared<RoaringBitmapVector>(count, IsNotNull());
+
+    switch (op) {
+        case OpType::LessThan: {
+            GetRoaringWrapper()->upper_bound_range_query(
+                value, false, bitset.get());
+        } break;
+        case OpType::LessEqual: {
+            GetRoaringWrapper()->upper_bound_range_query(
+                value, true, bitset.get());
+        } break;
+        case OpType::GreaterThan: {
+            GetRoaringWrapper()->lower_bound_range_query(
+                value, false, bitset.get());
+        } break;
+        case OpType::GreaterEqual: {
+            GetRoaringWrapper()->lower_bound_range_query(
+                value, true, bitset.get());
+        } break;
+        default:
+            ThrowInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
+    }
+
+    return bitset;
+}
+
+template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::Range(const T& lower_bound_value,
                                bool lb_inclusive,
@@ -470,6 +587,27 @@ InvertedIndexTantivy<T>::Range(const T& lower_bound_value,
                           lb_inclusive,
                           ub_inclusive,
                           &bitset);
+    return bitset;
+}
+
+template <typename T>
+RoaringBitmapVectorPtr
+InvertedIndexTantivy<T>::RangeRoaring(const T& lower_bound_value,
+                                      bool lb_inclusive,
+                                      const T& upper_bound_value,
+                                      bool ub_inclusive) {
+    tracer::AutoSpan span("InvertedIndexTantivy::RangeRoaringWithBounds",
+                          tracer::GetRootSpan());
+    auto count = Count();
+    auto bitset =
+        null_offset_.empty()
+            ? std::make_shared<RoaringBitmapVector>(count)
+            : std::make_shared<RoaringBitmapVector>(count, IsNotNull());
+    GetRoaringWrapper()->range_query(lower_bound_value,
+                                     upper_bound_value,
+                                     lb_inclusive,
+                                     ub_inclusive,
+                                     bitset.get());
     return bitset;
 }
 
@@ -588,7 +726,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
                 static_cast<const T*>(values), n);
         }
     }
-    wrapper_->create_reader(milvus::index::SetBitsetSealed);
+    wrapper_->create_reader(GetSetBitsetFn());
     finish();
     wrapper_->reload();
     ComputeByteSize();
@@ -597,10 +735,10 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
 template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
-    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_data) {
     if (schema_.nullable()) {
         int64_t total = 0;
-        for (const auto& data : field_datas) {
+        for (const auto& data : field_data) {
             total += data->get_null_count();
         }
         null_offset_.reserve(total);
@@ -620,7 +758,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
             if (!inverted_index_single_segment_) {
                 int64_t offset = 0;
                 if (schema_.nullable()) {
-                    for (const auto& data : field_datas) {
+                    for (const auto& data : field_data) {
                         auto n = data->get_num_rows();
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
@@ -633,7 +771,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                         }
                     }
                 } else {
-                    for (const auto& data : field_datas) {
+                    for (const auto& data : field_data) {
                         auto n = data->get_num_rows();
                         wrapper_->add_data<T>(
                             static_cast<const T*>(data->Data()), n, offset);
@@ -642,7 +780,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                 }
             } else {
                 int64_t offset = 0;
-                for (const auto& data : field_datas) {
+                for (const auto& data : field_data) {
                     auto n = data->get_num_rows();
                     if (schema_.nullable()) {
                         for (int i = 0; i < n; i++) {
@@ -665,12 +803,12 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         }
 
         case proto::schema::DataType::Array: {
-            build_index_for_array(field_datas);
+            build_index_for_array(field_data);
             break;
         }
 
         case proto::schema::DataType::JSON: {
-            build_index_for_json(field_datas);
+            build_index_for_json(field_data);
             break;
         }
 
@@ -684,13 +822,13 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
 template <typename T>
 void
 InvertedIndexTantivy<T>::build_index_for_array(
-    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_data) {
     using ElementType = std::conditional_t<std::is_same<T, int8_t>::value ||
                                                std::is_same<T, int16_t>::value,
                                            int32_t,
                                            T>;
     int64_t offset = 0;
-    for (const auto& data : field_datas) {
+    for (const auto& data : field_data) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
@@ -718,9 +856,9 @@ InvertedIndexTantivy<T>::build_index_for_array(
 template <>
 void
 InvertedIndexTantivy<std::string>::build_index_for_array(
-    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_data) {
     int64_t offset = 0;
-    for (const auto& data : field_datas) {
+    for (const auto& data : field_data) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
@@ -821,7 +959,7 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+        path_.c_str(), load_in_mmap, GetSetBitsetFn());
 
     if (!load_in_mmap) {
         disk_file_manager_->RemoveIndexFiles();
