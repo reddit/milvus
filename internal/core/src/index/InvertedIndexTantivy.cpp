@@ -222,7 +222,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+        prefix.c_str(), load_in_mmap, GetSetBitsetFn());
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -291,6 +291,12 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         fill_null_offsets(null_offsets_codec->PayloadData(),
                           null_offsets_codec->PayloadSize());
     }
+}
+
+template <typename T>
+SetBitsetFn
+InvertedIndexTantivy<T>::GetSetBitsetFn() const {
+    return milvus::index::SetBitsetSealed;
 }
 
 template <typename T>
@@ -588,7 +594,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
                 static_cast<const T*>(values), n);
         }
     }
-    wrapper_->create_reader(milvus::index::SetBitsetSealed);
+    wrapper_->create_reader(GetSetBitsetFn());
     finish();
     wrapper_->reload();
     ComputeByteSize();
@@ -821,7 +827,7 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+        path_.c_str(), load_in_mmap, GetSetBitsetFn());
 
     if (!load_in_mmap) {
         disk_file_manager_->RemoveIndexFiles();

@@ -29,6 +29,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include "common/Common.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/Types.h"
 #include "common/FieldData.h"
 #include "common/QueryInfo.h"
@@ -262,6 +263,13 @@ void inline SetBitsetGrowing(void* bitset,
         }
         (*bitmap)[id] = true;
     }
+}
+
+void inline SetBitsetRoaring(void* bitset,
+                             const uint32_t* doc_id,
+                             uintptr_t n) {
+    auto* bitmap = static_cast<RoaringBitmapVector*>(bitset);
+    bitmap->AddMany(doc_id, n);
 }
 
 // Get the SSO (Small String Optimization) threshold for std::string.

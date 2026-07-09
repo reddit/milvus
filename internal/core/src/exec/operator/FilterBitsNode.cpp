@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "FilterBitsNode.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/Tracer.h"
 #include "expr/ITypeExpr.h"
 #include "fmt/format.h"
@@ -23,6 +24,27 @@
 
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        auto child = row->child(0);
+        if (auto roaring =
+                std::dynamic_pointer_cast<RoaringBitmapVector>(child)) {
+            return roaring;
+        }
+    }
+
+    return nullptr;
+}
+
+}  // namespace
+
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
     DriverContext* driverctx,
@@ -93,6 +115,9 @@ PhyFilterBitsNode::GetOutput() {
 
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
+    RoaringBitmapVectorPtr roaring_bitset;
+    bool roaring_valid_values_all_valid = true;
+    size_t roaring_valid_values_size = 0;
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -100,8 +125,31 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result size should be size one and not "
                    "be nullptr");
 
-        if (auto col_vec =
-                std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
+        if (auto roaring_vec = GetRoaringBitmapVector(results_[0])) {
+            if (roaring_bitset == nullptr) {
+                roaring_bitset = std::make_shared<RoaringBitmapVector>(
+                    need_process_rows_, true);
+            }
+            roaring_bitset->OrShifted(*roaring_vec, num_processed_rows_);
+            if (roaring_valid_values_all_valid &&
+                roaring_vec->valid_values_all_valid()) {
+                roaring_valid_values_size += roaring_vec->size();
+            } else {
+                if (roaring_valid_values_all_valid) {
+                    valid_bitset.append(
+                        TargetBitmap(roaring_valid_values_size, true));
+                    roaring_valid_values_all_valid = false;
+                }
+                roaring_vec->AppendValidValuesTo(
+                    valid_bitset, 0, roaring_vec->size());
+                roaring_valid_values_size += roaring_vec->size();
+            }
+            num_processed_rows_ += roaring_vec->size();
+        } else if (auto col_vec =
+                       std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
+            AssertInfo(roaring_bitset == nullptr,
+                       "PhyFilterBitsNode result should not mix roaring and "
+                       "dense bitmap batches");
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
                 TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
@@ -119,6 +167,28 @@ PhyFilterBitsNode::GetOutput() {
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
+    if (roaring_bitset != nullptr) {
+        roaring_bitset->Flip();
+        if (!roaring_valid_values_all_valid) {
+            roaring_bitset->set_valid_values(std::move(valid_bitset));
+        }
+        AssertInfo(roaring_bitset->size() == need_process_rows_,
+                   "bitset size: {}, need_process_rows_: {}",
+                   roaring_bitset->size(),
+                   need_process_rows_);
+        std::chrono::high_resolution_clock::time_point scalar_end =
+            std::chrono::high_resolution_clock::now();
+        double scalar_cost =
+            std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
+                .count();
+        milvus::monitor::internal_core_search_latency_scalar.Observe(
+            scalar_cost / 1000);
+
+        std::vector<VectorPtr> col_res;
+        col_res.push_back(std::move(roaring_bitset));
+        return std::make_shared<RowVector>(col_res);
+    }
+
     bitset.flip();
     AssertInfo(bitset.size() == need_process_rows_,
                "bitset size: {}, need_process_rows_: {}",
@@ -128,8 +198,8 @@ PhyFilterBitsNode::GetOutput() {
 
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;
-    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
-                                                     std::move(valid_bitset)));
+    col_res.push_back(std::make_shared<RoaringBitmapVector>(
+        std::move(bitset), std::move(valid_bitset)));
     std::chrono::high_resolution_clock::time_point scalar_end =
         std::chrono::high_resolution_clock::now();
     double scalar_cost =

@@ -312,6 +312,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     LoadIndexMetas(const std::vector<std::string>& index_files,
                    const Config& config);
 
+    virtual SetBitsetFn
+    GetSetBitsetFn() const;
+
     // Filters out index files that are not belong to tantivy index.
     // For example, index files of json index may contain null offset files.
     // Modifying the index_files in place.
