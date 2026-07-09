@@ -14,6 +14,7 @@
 #include <string>
 #include <boost/filesystem.hpp>
 
+#include "common/RoaringBitmapVector.h"
 #include "cachinglayer/Manager.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/IndexStats.h"
@@ -87,12 +88,26 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     TargetBitmap
     MatchQuery(const std::string& query, uint32_t min_should_match);
 
+    void
+    MatchQuery(const std::string& query,
+               uint32_t min_should_match,
+               RoaringBitmapVector& bitset);
+
     TargetBitmap
     PhraseMatchQuery(const std::string& query, uint32_t slop);
+
+    void
+    PhraseMatchQuery(const std::string& query,
+                     uint32_t slop,
+                     RoaringBitmapVector& bitset);
 
  private:
     bool
     shouldTriggerCommit();
+
+ protected:
+    SetBitsetFn
+    GetSetBitsetFn() const override;
 
  private:
     mutable std::mutex mtx_;

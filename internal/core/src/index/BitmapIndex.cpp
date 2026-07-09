@@ -81,9 +81,9 @@ BitmapIndex<T>::Build(const Config& config) {
         return;
     }
 
-    auto field_datas =
+    auto field_data =
         storage::CacheRawDataAndFillMissing(this->file_manager_, config);
-    BuildWithFieldData(field_datas);
+    BuildWithFieldData(field_data);
 }
 
 template <typename T>
@@ -123,9 +123,9 @@ BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
 template <typename T>
 void
 BitmapIndex<T>::BuildPrimitiveField(
-    const std::vector<FieldDataPtr>& field_datas) {
+    const std::vector<FieldDataPtr>& field_data) {
     int64_t offset = 0;
-    for (const auto& data : field_datas) {
+    for (const auto& data : field_data) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
             if (data->is_valid(i)) {
@@ -141,9 +141,9 @@ BitmapIndex<T>::BuildPrimitiveField(
 template <typename T>
 void
 BitmapIndex<T>::BuildWithFieldData(
-    const std::vector<FieldDataPtr>& field_datas) {
+    const std::vector<FieldDataPtr>& field_data) {
     int total_num_rows = 0;
-    for (auto& field_data : field_datas) {
+    for (auto& field_data : field_data) {
         total_num_rows += field_data->get_num_rows();
     }
     if (total_num_rows == 0) {
@@ -162,10 +162,10 @@ BitmapIndex<T>::BuildWithFieldData(
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar:
-            BuildPrimitiveField(field_datas);
+            BuildPrimitiveField(field_data);
             break;
         case proto::schema::DataType::Array:
-            BuildArrayField(field_datas);
+            BuildArrayField(field_data);
             break;
         default:
             ThrowInfo(
@@ -179,14 +179,14 @@ BitmapIndex<T>::BuildWithFieldData(
 
 template <typename T>
 void
-BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
+BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_data) {
     int64_t offset = 0;
     using GetType = std::conditional_t<std::is_same_v<T, int8_t> ||
                                            std::is_same_v<T, int16_t> ||
                                            std::is_same_v<T, int32_t>,
                                        int32_t,
                                        T>;
-    for (const auto& data : field_datas) {
+    for (const auto& data : field_data) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
             if (data->is_valid(i)) {
@@ -540,7 +540,7 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
                 }
             }
 
-            // convert roaring vaule to frozen mode
+            // convert roaring value to frozen mode
             int32_t frozen_size = value.getFrozenSizeInBytes();
             auto aligned_size =
                 ((frozen_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
@@ -657,12 +657,12 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas = this->file_manager_->LoadIndexToMemory(
+    auto index_data = this->file_manager_->LoadIndexToMemory(
         index_files.value(), load_priority);
     BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
-    // clear index_datas to free memory early
-    index_datas.clear();
+    AssembleIndexData(index_data, binary_set);
+    // clear index_data to free memory early
+    index_data.clear();
     LoadWithoutAssemble(binary_set, config);
 }
 
@@ -702,6 +702,30 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
             auto it = bitsets_.find(val);
             if (it != bitsets_.end()) {
                 res |= it->second;
+            }
+        }
+    }
+    return res;
+}
+
+template <typename T>
+RoaringBitmapVectorPtr
+BitmapIndex<T>::InRoaring(const size_t n, const T* values) {
+    tracer::AutoSpan span("BitmapIndex::InRoaring", tracer::GetRootSpan());
+
+    AssertInfo(is_built_, "index has not been built");
+    if (!is_mmap_ && build_mode_ != BitmapIndexBuildMode::ROARING) {
+        return ScalarIndex<T>::InRoaring(n, values);
+    }
+
+    auto res = std::make_shared<RoaringBitmapVector>(total_num_rows_,
+                                                     valid_bitset_.clone());
+    auto& source = is_mmap_ ? bitmap_info_map_ : data_;
+    for (size_t i = 0; i < n; ++i) {
+        auto it = source.find(values[i]);
+        if (it != source.end()) {
+            for (const auto& offset : it->second) {
+                res->Add(offset);
             }
         }
     }
@@ -758,6 +782,31 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
         res &= valid_bitset_;
         return res;
     }
+}
+
+template <typename T>
+RoaringBitmapVectorPtr
+BitmapIndex<T>::NotInRoaring(const size_t n, const T* values) {
+    tracer::AutoSpan span("BitmapIndex::NotInRoaring", tracer::GetRootSpan());
+
+    AssertInfo(is_built_, "index has not been built");
+    if (!is_mmap_ && build_mode_ != BitmapIndexBuildMode::ROARING) {
+        return ScalarIndex<T>::NotInRoaring(n, values);
+    }
+
+    auto res = std::make_shared<RoaringBitmapVector>(total_num_rows_,
+                                                     valid_bitset_.clone());
+    res->Or(valid_bitset_, total_num_rows_);
+    auto& source = is_mmap_ ? bitmap_info_map_ : data_;
+    for (size_t i = 0; i < n; ++i) {
+        auto it = source.find(values[i]);
+        if (it != source.end()) {
+            for (const auto& offset : it->second) {
+                res->Remove(offset);
+            }
+        }
+    }
+    return res;
 }
 
 template <typename T>
@@ -857,6 +906,52 @@ BitmapIndex<T>::Range(const T& value, OpType op) {
         return std::move(RangeForBitset(value, op));
     }
 }
+
+template <typename T>
+RoaringBitmapVectorPtr
+BitmapIndex<T>::RangeRoaring(const T& value, OpType op) {
+    tracer::AutoSpan span("BitmapIndex::RangeRoaring", tracer::GetRootSpan());
+
+    AssertInfo(is_built_, "index has not been built");
+    if (!is_mmap_ && build_mode_ != BitmapIndexBuildMode::ROARING) {
+        return ScalarIndex<T>::RangeRoaring(value, op);
+    }
+
+    auto res = std::make_shared<RoaringBitmapVector>(total_num_rows_,
+                                                     valid_bitset_.clone());
+    if (ShouldSkip(value, value, op)) {
+        return res;
+    }
+
+    auto& source = is_mmap_ ? bitmap_info_map_ : data_;
+    auto lb = source.begin();
+    auto ub = source.end();
+    switch (op) {
+        case OpType::LessThan:
+            ub = source.lower_bound(value);
+            break;
+        case OpType::LessEqual:
+            ub = source.upper_bound(value);
+            break;
+        case OpType::GreaterThan:
+            lb = source.upper_bound(value);
+            break;
+        case OpType::GreaterEqual:
+            lb = source.lower_bound(value);
+            break;
+        default:
+            ThrowInfo(OpTypeInvalid,
+                      fmt::format("Invalid OperatorType: {}", op));
+    }
+
+    for (; lb != ub; ++lb) {
+        for (const auto& offset : lb->second) {
+            res->Add(offset);
+        }
+    }
+    return res;
+}
+
 template <typename T>
 TargetBitmap
 BitmapIndex<T>::RangeForMmap(const T& value, const OpType op) {
@@ -1061,6 +1156,45 @@ BitmapIndex<T>::Range(const T& lower_value,
         return RangeForBitset(
             lower_value, lb_inclusive, upper_value, ub_inclusive);
     }
+}
+
+template <typename T>
+RoaringBitmapVectorPtr
+BitmapIndex<T>::RangeRoaring(const T& lower_value,
+                             bool lb_inclusive,
+                             const T& upper_value,
+                             bool ub_inclusive) {
+    tracer::AutoSpan span("BitmapIndex::RangeRoaringWithBounds",
+                          tracer::GetRootSpan());
+
+    AssertInfo(is_built_, "index has not been built");
+    if (!is_mmap_ && build_mode_ != BitmapIndexBuildMode::ROARING) {
+        return ScalarIndex<T>::RangeRoaring(
+            lower_value, lb_inclusive, upper_value, ub_inclusive);
+    }
+
+    auto res = std::make_shared<RoaringBitmapVector>(total_num_rows_,
+                                                     valid_bitset_.clone());
+    if (lower_value > upper_value ||
+        (lower_value == upper_value && !(lb_inclusive && ub_inclusive))) {
+        return res;
+    }
+    if (ShouldSkip(lower_value, upper_value, OpType::Range)) {
+        return res;
+    }
+
+    auto& source = is_mmap_ ? bitmap_info_map_ : data_;
+    auto lb = lb_inclusive ? source.lower_bound(lower_value)
+                           : source.upper_bound(lower_value);
+    auto ub = ub_inclusive ? source.upper_bound(upper_value)
+                           : source.lower_bound(upper_value);
+
+    for (; lb != ub; ++lb) {
+        for (const auto& offset : lb->second) {
+            res->Add(offset);
+        }
+    }
+    return res;
 }
 
 template <typename T>

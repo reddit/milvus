@@ -24,6 +24,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Utils.h"
@@ -1113,6 +1114,60 @@ class SegmentExpr : public Expr {
                                               std::move(valid_result));
     }
 
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksRoaring(FUNC func, const ValTypes&... values) {
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+        using Index = index::ScalarIndex<IndexInnerType>;
+        auto real_batch_size = GetNextBatchSize();
+        auto result =
+            std::make_shared<RoaringBitmapVector>(real_batch_size, false);
+        TargetBitmap valid_result;
+        int processed_rows = 0;
+
+        const auto start_index_chunk = current_index_chunk_;
+        const auto start_index_chunk_pos = current_index_chunk_pos_;
+        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
+            if (cached_index_chunk_id_ != i) {
+                auto index_result = GetIndexPtrForChunk<IndexInnerType>(i);
+                Index* index_ptr = index_result.index_ptr;
+
+                cached_index_chunk_roaring_res_ = func(index_ptr, values...);
+                cached_index_chunk_id_ = i;
+            }
+
+            auto data_pos = i == start_index_chunk ? start_index_chunk_pos : 0;
+            AssertInfo(data_pos <= cached_index_chunk_roaring_res_->size(),
+                       "invalid index chunk offset {} for chunk size {}",
+                       data_pos,
+                       cached_index_chunk_roaring_res_->size());
+            auto remaining_rows =
+                int64_t(cached_index_chunk_roaring_res_->size() - data_pos);
+            auto size = std::min(
+                std::min(size_per_chunk_ - data_pos,
+                         batch_size_ - processed_rows),
+                remaining_rows);
+            auto sliced =
+                cached_index_chunk_roaring_res_->Slice(data_pos, size);
+            result->OrShifted(*sliced, processed_rows);
+            sliced->AppendValidValuesTo(valid_result, 0, size);
+
+            if (processed_rows + size >= batch_size_) {
+                current_index_chunk_ = i;
+                current_index_chunk_pos_ =
+                    i == start_index_chunk ? start_index_chunk_pos + size
+                                           : size;
+                break;
+            }
+            processed_rows += size;
+        }
+
+        result->set_valid_values(std::move(valid_result));
+        return result;
+    }
+
     template <typename T>
     TargetBitmap
     ProcessChunksForValid(bool use_index) {
@@ -1587,11 +1642,13 @@ class SegmentExpr : public Expr {
     // Cache for index scan to avoid search index every batch
     int64_t cached_index_chunk_id_{-1};
     std::shared_ptr<TargetBitmap> cached_index_chunk_res_{nullptr};
+    RoaringBitmapVectorPtr cached_index_chunk_roaring_res_{nullptr};
     // Cache for chunk valid res.
     std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
+    RoaringBitmapVectorPtr cached_match_roaring_res_{nullptr};
     int32_t consistency_level_{0};
 
     // Cache for ngram match.

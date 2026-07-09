@@ -16,6 +16,7 @@
 
 #include "VectorSearchNode.h"
 #include "common/ArrayOffsets.h"
+#include "common/BitsetView.h"
 #include "common/Tracer.h"
 #include "common/Vector.h"
 #include "fmt/format.h"
@@ -23,6 +24,26 @@
 #include "monitor/Monitor.h"
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        auto child = row->child(0);
+        if (auto roaring =
+                std::dynamic_pointer_cast<RoaringBitmapVector>(child)) {
+            return roaring;
+        }
+    }
+
+    return nullptr;
+}
+
+}  // namespace
 
 static milvus::SearchResult
 empty_search_result(int64_t num_queries, bool element_level) {
@@ -92,46 +113,99 @@ PhyVectorSearchNode::GetOutput() {
         search_info_.array_offsets_ = array_offsets;
 
         if (!query_context_->bitset_is_element_level()) {
-            auto col_input = GetColumnVector(input_);
-            TargetBitmapView view(col_input->GetRawData(), col_input->size());
-            TargetBitmapView valid_view(col_input->GetValidRawData(),
-                                        col_input->size());
+            auto row_roaring = GetRoaringBitmapVector(input_);
+            if (row_roaring == nullptr) {
+                row_roaring = RoaringBitmapVector::FromColumnVector(
+                    GetColumnVector(input_));
+            }
 
-            auto [element_bitset, valid_element_bitset] =
-                array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
-            data_cnt = element_bitset.size();
+            auto row_count = row_roaring->size();
+            auto element_range = array_offsets->ElementIDRangeOfRow(row_count);
+            auto element_start = element_range.first;
+            auto element_end = element_range.second;
+            data_cnt = element_end - element_start;
             query_context_->set_active_element_count(data_cnt);
 
+            auto element_roaring =
+                std::make_shared<RoaringBitmapVector>(data_cnt, true);
+            auto excluded_row_count = row_roaring->count();
+            auto selected_row_count = row_count - excluded_row_count;
+            auto add_element_range = [&](uint32_t row_id) {
+                auto [start, end] = array_offsets->ElementIDRangeOfRow(row_id);
+                element_roaring->AddRange(start - element_start,
+                                          end - element_start);
+            };
+            auto remove_element_range = [&](uint32_t row_id) {
+                auto [start, end] = array_offsets->ElementIDRangeOfRow(row_id);
+                element_roaring->RemoveRange(start - element_start,
+                                             end - element_start);
+            };
+
+            if (selected_row_count <= excluded_row_count) {
+                element_roaring->SetAll();
+                for (uint32_t i = 0; i < selected_row_count; ++i) {
+                    remove_element_range(row_roaring->SelectFalse(i));
+                }
+            } else {
+                for (uint32_t i = 0; i < excluded_row_count; ++i) {
+                    add_element_range(row_roaring->SelectTrue(i));
+                }
+            }
+
+            AssertInfo(row_roaring->valid_values_all_valid(),
+                       "element-level roaring bitset conversion does not "
+                       "support invalid row bitsets");
             std::vector<VectorPtr> col_res;
-            col_res.push_back(std::make_shared<ColumnVector>(
-                std::move(element_bitset), std::move(valid_element_bitset)));
+            col_res.push_back(std::move(element_roaring));
             input_ = std::make_shared<RowVector>(col_res);
         }
     }
 
-    auto col_input = GetColumnVector(input_);
+    auto roaring_input = GetRoaringBitmapVector(input_);
+    ColumnVectorPtr col_input = nullptr;
+    if (roaring_input == nullptr) {
+        col_input = GetColumnVector(input_);
+    }
 
     // Prepare BitsetView for search.
     // Fast path: all_rows_visible + non-element-level -> empty BitsetView
     //            (IDSelectorAll in Knowhere, skips per-vector bit test).
     // Normal path: build BitsetView from the bitmap produced upstream.
     milvus::BitsetView search_view;
+    std::unique_ptr<milvus::FrozenRoaringBitsetView> frozen_search_view;
 
     if (query_context_->get_all_rows_visible() && !ph.element_level_) {
         // search_view stays default-constructed (empty)
     } else {
-        TargetBitmapView view(col_input->GetRawData(), col_input->size());
+        if (roaring_input != nullptr) {
+            if (roaring_input->count() == roaring_input->size()) {
+                query_context_->set_search_result(std::move(
+                    empty_search_result(num_queries, ph.element_level_)));
+                return input_;
+            }
+            if (roaring_input->count() > 0) {
+                frozen_search_view =
+                    std::make_unique<milvus::FrozenRoaringBitsetView>(
+                        *roaring_input);
+                search_view = frozen_search_view->view();
+            }
+            data_cnt = roaring_input->size();
+        } else {
+            TargetBitmapView view(col_input->GetRawData(), col_input->size());
 
-        if (view.all()) {
-            query_context_->set_search_result(
-                std::move(empty_search_result(num_queries, ph.element_level_)));
-            return input_;
+            if (view.all()) {
+                query_context_->set_search_result(std::move(
+                    empty_search_result(num_queries, ph.element_level_)));
+                return input_;
+            }
+
+            if (!view.none()) {
+                frozen_search_view =
+                    std::make_unique<milvus::FrozenRoaringBitsetView>(view);
+                search_view = frozen_search_view->view();
+            }
+            data_cnt = col_input->size();
         }
-
-        // TODO: uniform knowhere BitsetView and milvus BitsetView
-        search_view = milvus::BitsetView((uint8_t*)col_input->GetRawData(),
-                                         col_input->size());
-        data_cnt = search_view.size();
     }
 
     // Single search + metrics path

@@ -905,12 +905,11 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<IndexInnerType>& vals) {
-        TermIndexFunc<T> func;
-        return func(index_ptr, vals.size(), vals.data());
+        return index_ptr->InRoaring(vals.size(), vals.data());
     };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
-    auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
+    auto res = ProcessIndexChunksRoaring<T>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -938,11 +937,10 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<uint8_t>& vals) {
-        TermIndexFunc<bool> func;
-        return std::move(func(index_ptr, vals.size(), (bool*)vals.data()));
+        return index_ptr->InRoaring(vals.size(), (bool*)vals.data());
     };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
-    auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);
+    auto res = ProcessIndexChunksRoaring<bool>(execute_sub_batch, args->values_);
     return res;
 }
 
