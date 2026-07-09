@@ -24,6 +24,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Utils.h"
@@ -1592,6 +1593,7 @@ class SegmentExpr : public Expr {
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
+    RoaringBitmapVectorPtr cached_match_roaring_res_{nullptr};
     int32_t consistency_level_{0};
 
     // Cache for ngram match.

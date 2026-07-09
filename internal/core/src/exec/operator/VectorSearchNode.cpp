@@ -16,6 +16,7 @@
 
 #include "VectorSearchNode.h"
 #include "common/ArrayOffsets.h"
+#include "common/BitsetView.h"
 #include "common/Tracer.h"
 #include "common/Vector.h"
 #include "fmt/format.h"
@@ -23,6 +24,26 @@
 #include "monitor/Monitor.h"
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        auto child = row->child(0);
+        if (auto roaring =
+                std::dynamic_pointer_cast<RoaringBitmapVector>(child)) {
+            return roaring;
+        }
+    }
+
+    return nullptr;
+}
+
+}  // namespace
 
 static milvus::SearchResult
 empty_search_result(int64_t num_queries, bool element_level) {
@@ -92,7 +113,9 @@ PhyVectorSearchNode::GetOutput() {
         search_info_.array_offsets_ = array_offsets;
 
         if (!query_context_->bitset_is_element_level()) {
-            auto col_input = GetColumnVector(input_);
+            auto roaring_input = GetRoaringBitmapVector(input_);
+            auto col_input = roaring_input ? roaring_input->ToColumnVector()
+                                           : GetColumnVector(input_);
             TargetBitmapView view(col_input->GetRawData(), col_input->size());
             TargetBitmapView valid_view(col_input->GetValidRawData(),
                                         col_input->size());
@@ -109,29 +132,51 @@ PhyVectorSearchNode::GetOutput() {
         }
     }
 
-    auto col_input = GetColumnVector(input_);
+    auto roaring_input = GetRoaringBitmapVector(input_);
+    ColumnVectorPtr col_input = nullptr;
+    if (roaring_input == nullptr) {
+        col_input = GetColumnVector(input_);
+    }
 
     // Prepare BitsetView for search.
     // Fast path: all_rows_visible + non-element-level -> empty BitsetView
     //            (IDSelectorAll in Knowhere, skips per-vector bit test).
     // Normal path: build BitsetView from the bitmap produced upstream.
     milvus::BitsetView search_view;
+    std::unique_ptr<milvus::FrozenRoaringBitsetView> frozen_search_view;
 
     if (query_context_->get_all_rows_visible() && !ph.element_level_) {
         // search_view stays default-constructed (empty)
     } else {
-        TargetBitmapView view(col_input->GetRawData(), col_input->size());
+        if (roaring_input != nullptr) {
+            if (roaring_input->count() == roaring_input->size()) {
+                query_context_->set_search_result(std::move(
+                    empty_search_result(num_queries, ph.element_level_)));
+                return input_;
+            }
+            if (roaring_input->count() > 0) {
+                frozen_search_view =
+                    std::make_unique<milvus::FrozenRoaringBitsetView>(
+                        *roaring_input);
+                search_view = frozen_search_view->view();
+            }
+            data_cnt = roaring_input->size();
+        } else {
+            TargetBitmapView view(col_input->GetRawData(), col_input->size());
 
-        if (view.all()) {
-            query_context_->set_search_result(
-                std::move(empty_search_result(num_queries, ph.element_level_)));
-            return input_;
+            if (view.all()) {
+                query_context_->set_search_result(std::move(
+                    empty_search_result(num_queries, ph.element_level_)));
+                return input_;
+            }
+
+            if (!view.none()) {
+                frozen_search_view =
+                    std::make_unique<milvus::FrozenRoaringBitsetView>(view);
+                search_view = frozen_search_view->view();
+            }
+            data_cnt = col_input->size();
         }
-
-        // TODO: uniform knowhere BitsetView and milvus BitsetView
-        search_view = milvus::BitsetView((uint8_t*)col_input->GetRawData(),
-                                         col_input->size());
-        data_cnt = search_view.size();
     }
 
     // Single search + metrics path

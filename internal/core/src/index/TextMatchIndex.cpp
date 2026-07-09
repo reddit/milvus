@@ -190,7 +190,7 @@ TextMatchIndex::Load(const Config& config) {
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetRoaring);
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -315,7 +315,13 @@ TextMatchIndex::Reload() {
 
 void
 TextMatchIndex::CreateReader(SetBitsetFn set_bitset) {
-    wrapper_->create_reader(set_bitset);
+    (void)set_bitset;
+    wrapper_->create_reader(milvus::index::SetBitsetRoaring);
+}
+
+SetBitsetFn
+TextMatchIndex::GetSetBitsetFn() const {
+    return milvus::index::SetBitsetRoaring;
 }
 
 void
@@ -333,12 +339,23 @@ TextMatchIndex::MatchQuery(const std::string& query,
         Reload();
     }
 
-    TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
-    // So we cannot use the count operation to get the total count for bitmap.
-    // Just use the maximum offset of hits to get the total count for bitmap here.
+    RoaringBitmapVector roaring(static_cast<size_t>(Count()));
+    MatchQuery(query, min_should_match, roaring);
+    return roaring.ToTargetBitmap();
+}
+
+void
+TextMatchIndex::MatchQuery(const std::string& query,
+                           uint32_t min_should_match,
+                           RoaringBitmapVector& bitset) {
+    tracer::AutoSpan span("TextMatchIndex::MatchQueryRoaring",
+                          tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
     wrapper_->match_query(query, min_should_match, &bitset);
-    return bitset;
 }
 
 TargetBitmap
@@ -350,12 +367,23 @@ TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
         Reload();
     }
 
-    TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
-    // So we cannot use the count operation to get the total count for bitmap.
-    // Just use the maximum offset of hits to get the total count for bitmap here.
+    RoaringBitmapVector roaring(static_cast<size_t>(Count()));
+    PhraseMatchQuery(query, slop, roaring);
+    return roaring.ToTargetBitmap();
+}
+
+void
+TextMatchIndex::PhraseMatchQuery(const std::string& query,
+                                 uint32_t slop,
+                                 RoaringBitmapVector& bitset) {
+    tracer::AutoSpan span("TextMatchIndex::PhraseMatchQueryRoaring",
+                          tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
     wrapper_->phrase_match_query(query, slop, &bitset);
-    return bitset;
 }
 
 }  // namespace milvus::index

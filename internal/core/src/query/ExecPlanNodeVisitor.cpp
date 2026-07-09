@@ -11,6 +11,7 @@
 
 #include "query/ExecPlanNodeVisitor.h"
 
+#include <iostream>
 #include <memory>
 #include <utility>
 
@@ -20,6 +21,7 @@
 #include "query/Utils.h"
 #include "segcore/SegmentGrowing.h"
 #include "common/Json.h"
+#include "common/RoaringBitmapVector.h"
 #include "log/Log.h"
 #include "plan/PlanNode.h"
 #include "exec/Task.h"
@@ -74,6 +76,14 @@ ExecPlanNodeVisitor::ExecuteTask(
             if (collect_bitset) {
                 BitsetTypeView view(vec->GetRawData(), vec->size());
                 bitset_holder.append(view);
+            }
+        } else if (auto vec = std::dynamic_pointer_cast<RoaringBitmapVector>(
+                       childrens[0])) {
+            processed_num += vec->size();
+            std::cerr << "processed_num: " << processed_num
+                      << ", collect_bitset: " << collect_bitset << std::endl;
+            if (collect_bitset) {
+                bitset_holder.append(vec->ToTargetBitmap());
             }
         } else {
             ThrowInfo(UnexpectedError, "expr return type not matched");
