@@ -9,8 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
-#include <unordered_map>
-
 #include "Reduce.h"
 #include "common/QueryResult.h"
 #include "query/PlanImpl.h"
@@ -52,9 +50,6 @@ class GroupReduceHelper : public ReduceHelper {
                   int64_t nq_end,
                   std::unique_ptr<milvus::proto::schema::SearchResultData>&
                       search_res_data) override;
-
- private:
-    std::unordered_map<milvus::GroupByValueType, int64_t> group_by_val_count_{};
 };
 
 }  // namespace milvus::segcore

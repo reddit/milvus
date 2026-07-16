@@ -51,7 +51,6 @@ const char VEC_OPT_FIELDS[] = "opt_fields";
 const char PAGE_RETAIN_ORDER[] = "page_retain_order";
 const char TEXT_LOG_ROOT_PATH[] = "text_log";
 const char ITERATIVE_FILTER[] = "iterative_filter";
-const char GROUP_BY_REFILL[] = "group_by_refill";
 const char HINTS[] = "hints";
 // json stats related
 const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";

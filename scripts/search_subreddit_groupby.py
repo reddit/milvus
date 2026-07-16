@@ -58,6 +58,7 @@ def search_groupby(
     topk: int,
     group_size: int,
     strict_group_size: bool,
+    group_by_refill: bool,
 ) -> dict[str, Any]:
     payload = {
         "collectionName": collection_name,
@@ -72,7 +73,7 @@ def search_groupby(
         "searchParams": {
             "metricType": "COSINE",
             "params": {"ef": 64},
-            "group_by_refill": "false"
+            "group_by_refill": str(group_by_refill).lower(),
         },
     }
     return client.post("/v2/vectordb/entities/search", payload)
@@ -133,6 +134,11 @@ def parse_args() -> argparse.Namespace:
         help="Require exactly group-size hits per group",
     )
     parser.add_argument(
+        "--group-by-refill",
+        action="store_true",
+        help="Enable group-by refill when groups fall short of group-size",
+    )
+    parser.add_argument(
         "--filter-count",
         type=int,
         default=DEFAULT_FILTER_COUNT,
@@ -170,7 +176,8 @@ def main() -> int:
     print(f"Query vector (dim={VECTOR_DIM}): {query_vector[:4]}... (truncated)")
     print(
         f"Search: topk={args.topk}, group_by=subreddit_id, "
-        f"group_size={args.group_size}, strict={args.strict_group_size}"
+        f"group_size={args.group_size}, strict={args.strict_group_size}, "
+        f"group_by_refill={args.group_by_refill}"
     )
 
     response = search_groupby(
@@ -181,6 +188,7 @@ def main() -> int:
         args.topk,
         args.group_size,
         args.strict_group_size,
+        args.group_by_refill,
     )
 
     if args.json:

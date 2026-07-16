@@ -92,6 +92,11 @@ class ReduceHelper {
     FilterInvalidSearchResult(SearchResult* search_result);
 
     void
+    CompactSearchResult(
+        SearchResult* search_result,
+        std::vector<GroupByValueType>* companion_values = nullptr);
+
+    void
     RefreshSearchResults();
 
     virtual void

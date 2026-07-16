@@ -91,28 +91,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             }
         }
 
-        if (search_info.search_params_.contains(GROUP_BY_REFILL)) {
-            auto& refill_param = search_info.search_params_[GROUP_BY_REFILL];
-            if (refill_param.is_boolean()) {
-                search_info.proxy_group_by_refill_ = refill_param.get<bool>();
-            } else if (refill_param.is_string()) {
-                auto refill_param_str = refill_param.get<std::string>();
-                if (refill_param_str == "true" || refill_param_str == "True") {
-                    search_info.proxy_group_by_refill_ = true;
-                } else if (refill_param_str == "false" ||
-                           refill_param_str == "False") {
-                    search_info.proxy_group_by_refill_ = false;
-                } else {
-                    ThrowInfo(ConfigInvalid,
-                              "group_by_refill: {} not supported",
-                              refill_param);
-                }
-            } else {
-                ThrowInfo(ConfigInvalid,
-                          "group_by_refill: {} not supported",
-                          refill_param);
-            }
-        }
+        search_info.proxy_group_by_refill_ = query_info_proto.group_by_refill();
 
         if (query_info_proto.bm25_avgdl() > 0) {
             search_info.search_params_[knowhere::meta::BM25_AVGDL] =

@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "GroupReduce.h"
-#include <numeric>
+#include <unordered_map>
 
 #include "common/Consts.h"
 #include "fmt/format.h"
@@ -186,51 +186,8 @@ GroupReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
                             search_result->seg_offsets_.size(),
                             "group filter invalid result");
 
-    std::vector<int64_t> real_topks(nq, 0);
-    uint32_t valid_index = 0;
-    auto segment = static_cast<SegmentInterface*>(search_result->segment_);
-    auto& offsets = search_result->seg_offsets_;
-    auto& distances = search_result->distances_;
     auto& group_by_values = search_result->group_by_values_.value();
-    int segment_row_count = segment->get_row_count();
-
-    for (auto i = 0; i < nq; ++i) {
-        for (auto j = 0; j < topK; ++j) {
-            auto index = i * topK + j;
-            if (offsets[index] == INVALID_SEG_OFFSET) {
-                continue;
-            }
-            AssertInfo(
-                0 <= offsets[index] && offsets[index] < segment_row_count,
-                fmt::format("invalid offset {}, segment {} with "
-                            "rows num {}, data or index corruption",
-                            offsets[index],
-                            segment->get_segment_id(),
-                            segment_row_count));
-            if (valid_index != index) {
-                offsets[valid_index] = offsets[index];
-                distances[valid_index] = distances[index];
-                group_by_values[valid_index] =
-                    std::move(group_by_values[index]);
-                if (search_result->element_level_) {
-                    search_result->element_indices_[valid_index] =
-                        search_result->element_indices_[index];
-                }
-            }
-            valid_index++;
-            real_topks[i]++;
-        }
-    }
-    offsets.resize(valid_index);
-    distances.resize(valid_index);
-    group_by_values.resize(valid_index);
-    if (search_result->element_level_) {
-        search_result->element_indices_.resize(valid_index);
-    }
-    search_result->topk_per_nq_prefix_sum_.resize(nq + 1);
-    std::partial_sum(real_topks.begin(),
-                     real_topks.end(),
-                     search_result->topk_per_nq_prefix_sum_.begin() + 1);
+    CompactSearchResult(search_result, &group_by_values);
 }
 
 int64_t
@@ -243,7 +200,6 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         heap;
     pk_set_.clear();
     element_result_set_.clear();
-    group_by_val_count_.clear();
     pairs_.clear();
 
     pairs_.reserve(num_segments_);
@@ -266,6 +222,7 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
     }
 
     int64_t dup_cnt = 0;
+    auto start = offset;
     auto group_size = int64_t(1);
     for (auto search_result : search_results_) {
         if (search_result->group_size_.has_value()) {
@@ -273,20 +230,9 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
             break;
         }
     }
-    auto selected_groups_full = [&]() {
-        if (static_cast<int64_t>(group_by_val_count_.size()) < topk) {
-            return false;
-        }
-        return std::all_of(group_by_val_count_.begin(),
-                           group_by_val_count_.end(),
-                           [group_size](const auto& item) {
-                               return item.second >= group_size;
-                           });
-    };
-    while (!heap.empty()) {
-        if (selected_groups_full()) {
-            break;
-        }
+    auto result_limit = topk * group_size;
+    std::unordered_map<GroupByValueType, int64_t> group_counts;
+    while (offset - start < result_limit && !heap.empty()) {
         auto pilot = heap.top();
         heap.pop();
 
@@ -305,16 +251,15 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                    group_by_values.size());
         auto& group_by_value = group_by_values[pilot->offset_];
 
-        auto group_iter = group_by_val_count_.find(group_by_value);
-        auto is_new_group = group_iter == group_by_val_count_.end();
+        auto group_iter = group_counts.find(group_by_value);
+        auto is_new_group = group_iter == group_counts.end();
         auto group_is_full = !is_new_group && group_iter->second >= group_size;
         auto group_capacity_is_full =
-            is_new_group &&
-            static_cast<int64_t>(group_by_val_count_.size()) >= topk;
+            is_new_group && static_cast<int64_t>(group_counts.size()) >= topk;
 
         if (!group_is_full && !group_capacity_is_full) {
             if (TryAcceptSearchResult(*pilot)) {
-                auto& group_count = group_by_val_count_[group_by_value];
+                auto& group_count = group_counts[group_by_value];
                 group_count++;
                 pilot->search_result_->result_offsets_.push_back(offset++);
                 final_search_records_[index][qi].push_back(pilot->offset_);

@@ -107,10 +107,9 @@ PhyGroupByNode::GetOutput() {
                                       search_result.unity_topK_);
             search_result.topk_per_nq_prefix_sum_.resize(
                 search_result.total_nq_ + 1);
-            std::partial_sum(
-                topks.begin(),
-                topks.end(),
-                search_result.topk_per_nq_prefix_sum_.begin() + 1);
+            std::partial_sum(topks.begin(),
+                             topks.end(),
+                             search_result.topk_per_nq_prefix_sum_.begin() + 1);
         }
     }
     tracer::AddEvent(

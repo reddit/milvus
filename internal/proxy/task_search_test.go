@@ -189,6 +189,7 @@ func TestGroupByRefillOption(t *testing.T) {
 		task := &searchTask{
 			SearchRequest: &internalpb.SearchRequest{
 				GroupByFieldId: 101,
+				Nq:             1,
 			},
 			queryInfos: []*planpb.QueryInfo{{GroupByFieldId: 101}},
 		}
@@ -199,35 +200,10 @@ func TestGroupByRefillOption(t *testing.T) {
 
 		task.IsAdvanced = true
 		require.False(t, task.shouldRunGroupByRefill())
-	})
 
-	t.Run("propagate refill flag to query info", func(t *testing.T) {
-		queryInfo := &planpb.QueryInfo{
-			GroupByFieldId: 101,
-			SearchParams:   `{"nprobe":10}`,
-		}
-		require.NoError(t, setGroupByRefillOnQueryInfo(queryInfo, false))
-		require.Equal(t, `{"nprobe":10}`, queryInfo.GetSearchParams())
-
-		require.NoError(t, setGroupByRefillOnQueryInfo(queryInfo, true))
-		require.Contains(t, queryInfo.GetSearchParams(), `"group_by_refill":true`)
-
-		queryInfo.GroupByFieldId = 0
-		require.NoError(t, setGroupByRefillOnQueryInfo(queryInfo, true))
-		require.NotContains(t, queryInfo.GetSearchParams(), `"group_by_refill":true`)
-	})
-
-	t.Run("normalize refill flag in params", func(t *testing.T) {
-		queryInfo := &planpb.QueryInfo{
-			GroupByFieldId: 101,
-			SearchParams:   `{"group_by_refill":"true","nprobe":10}`,
-		}
-		require.NoError(t, setGroupByRefillOnQueryInfo(queryInfo, false))
-		require.Contains(t, queryInfo.GetSearchParams(), `"group_by_refill":true`)
-		require.NotContains(t, queryInfo.GetSearchParams(), `"group_by_refill":"true"`)
-
-		queryInfo.SearchParams = `{"group_by_refill":"invalid"}`
-		require.Error(t, setGroupByRefillOnQueryInfo(queryInfo, false))
+		task.IsAdvanced = false
+		task.Nq = 2
+		require.False(t, task.shouldRunGroupByRefill())
 	})
 }
 

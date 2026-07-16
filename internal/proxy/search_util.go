@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -575,57 +574,6 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	}
 
 	return ret, nil
-}
-
-func setGroupByRefillOnQueryInfo(queryInfo *planpb.QueryInfo, enabled bool) error {
-	params := map[string]interface{}{}
-	if queryInfo.GetSearchParams() != "" {
-		if err := json.Unmarshal([]byte(queryInfo.GetSearchParams()), &params); err != nil {
-			return err
-		}
-	}
-	if queryInfo.GetGroupByFieldId() <= 0 {
-		if _, ok := params[GroupByRefillKey]; !ok {
-			return nil
-		}
-		delete(params, GroupByRefillKey)
-		bs, err := json.Marshal(params)
-		if err != nil {
-			return err
-		}
-		queryInfo.SearchParams = string(bs)
-		return nil
-	}
-	normalized := false
-	if raw, ok := params[GroupByRefillKey]; ok {
-		switch value := raw.(type) {
-		case bool:
-		case string:
-			parsed, err := strconv.ParseBool(value)
-			if err != nil {
-				return merr.WrapErrParameterInvalid("true or false", value,
-					"value for group_by_refill is invalid")
-			}
-			params[GroupByRefillKey] = parsed
-			normalized = true
-		default:
-			return merr.WrapErrParameterInvalid("true or false", fmt.Sprint(value),
-				"value for group_by_refill is invalid")
-		}
-	}
-	if enabled {
-		params[GroupByRefillKey] = true
-		normalized = true
-	}
-	if !normalized {
-		return nil
-	}
-	bs, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
-	queryInfo.SearchParams = string(bs)
-	return nil
 }
 
 // parseRankParams get limit and offset from rankParams, both are optional.
