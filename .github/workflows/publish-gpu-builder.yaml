@@ -1,20 +1,8 @@
 name: Publish Gpu Builder
 # TODO: do not trigger action for some document file update
 
-# This workflow is triggered on pushes or pull request to the repository.
+# Disabled in this fork; CI runs via internal pipelines.
 on:
-  push:
-    # file paths to consider in the event. Optional; defaults to all.
-    paths:
-      - 'build/docker/builder/gpu/**'
-      - '.github/workflows/publish-gpu-builder.yaml'
-      - '!**.md'
-  pull_request:
-    # file paths to consider in the event. Optional; defaults to all.
-    paths:
-      - 'build/docker/builder/gpu/**'
-      - '.github/workflows/publish-gpu-builder.yaml'
-      - '!**.md'
   workflow_dispatch:
     inputs:
       RunnerHost:
@@ -37,7 +25,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Get version from system time after release step
-        id: extracter
+        id: extractor
         run: |
           echo "version=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
           echo "sha_short=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
@@ -76,6 +64,6 @@ jobs:
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && ${{ env.OS == 'ubuntu22.04' }}
         uses: ./.github/actions/bump-builder-version
         with:
-          tag: "${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}"
+          tag: "${{ steps.extractor.outputs.version }}-${{ steps.extractor.outputs.sha_short }}"
           type: gpu
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}

@@ -1,42 +1,8 @@
 name: Build and test
 
-# This workflow is triggered on pushes or pull request to the repository.
+# Disabled in this fork; CI runs via internal pipelines.
 on:
-  push:
-    # file paths to consider in the event. Optional; defaults to all.
-    paths:
-      - 'scripts/**'
-      - 'internal/**'
-      - 'client/**'
-      - 'pkg/**'
-      - 'cmd/**'
-      - 'build/**'
-      - 'tests/integration/**' # run integration test
-      - '.github/workflows/main.yaml'
-      - '.env'
-      - docker-compose.yml
-      - Makefile
-      - go.mod
-      - '!**.md'
-      - '!build/ci/jenkins/**'
-  pull_request:
-    # file paths to consider in the event. Optional; defaults to all.
-    paths:
-      - 'scripts/**'
-      - 'internal/**'
-      - 'pkg/**'
-      - 'client/**'
-      - 'cmd/**'
-      - 'build/**'
-      - 'tests/integration/**' # run integration test
-      - '.github/workflows/main.yaml'
-      - '.env'
-      - docker-compose.yml
-      - Makefile
-      - go.mod
-      - '!**.md'
-      - '!build/ci/jenkins/**'
-
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
