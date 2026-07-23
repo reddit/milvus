@@ -20,7 +20,9 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	clientmodel "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -40,6 +42,59 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterStreamingNode(r)
 		RegisterLoggingMetrics(r)
 	})
+}
+
+func TestProxySQLatencySLO(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(ProxySQLatencySLO)
+	registry.MustRegister(ProxySQLatencyGranular)
+
+	const (
+		nodeID         = "classic-histogram-test"
+		queryType      = "search"
+		databaseName   = "classic-histogram-test"
+		collectionName = "classic-histogram-test"
+	)
+	ProxySQLatencySLO.WithLabelValues(nodeID, queryType, databaseName, collectionName).Observe(501)
+	ProxySQLatencyGranular.WithLabelValues(nodeID, queryType, databaseName, collectionName).Observe(501)
+
+	metricFamilies, err := registry.Gather()
+	require.NoError(t, err)
+
+	var sloHistogram, granularHistogram *clientmodel.Histogram
+	for _, family := range metricFamilies {
+		for _, metric := range family.GetMetric() {
+			if metricHasLabel(metric, nodeIDLabelName, nodeID) {
+				switch family.GetName() {
+				case "milvus_proxy_sq_latency_slo":
+					sloHistogram = metric.GetHistogram()
+				case "milvus_proxy_sq_latency_granular":
+					granularHistogram = metric.GetHistogram()
+				}
+				break
+			}
+		}
+	}
+	require.NotNil(t, sloHistogram)
+	require.NotNil(t, granularHistogram)
+
+	upperBounds := make([]float64, 0, len(sloHistogram.GetBucket()))
+	for _, bucket := range sloHistogram.GetBucket() {
+		upperBounds = append(upperBounds, bucket.GetUpperBound())
+	}
+	assert.Equal(t, sqLatencySLOBuckets, upperBounds)
+	assert.Nil(t, sloHistogram.Schema, "SLO histogram must be classic-only")
+	assert.Empty(t, granularHistogram.GetBucket(), "granular histogram must remain native-only")
+	assert.NotNil(t, granularHistogram.Schema, "granular native histogram must remain enabled")
+}
+
+func metricHasLabel(metric *clientmodel.Metric, name, value string) bool {
+	for _, label := range metric.GetLabel() {
+		if label.GetName() == name && label.GetValue() == value {
+			return true
+		}
+	}
+	return false
 }
 
 func TestGetRegisterer(t *testing.T) {
