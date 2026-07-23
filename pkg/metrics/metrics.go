@@ -168,6 +168,10 @@ var (
 	// [0.1 0.25 0.5 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 1.31072e+05]
 	subMsBuckets = append([]float64{0.1, 0.25, 0.5}, prometheus.ExponentialBuckets(1, 2, 18)...)
 
+	// sqLatencySLOBuckets defines classic histogram boundaries for
+	// milvus_proxy_sq_latency_slo (unit: ms). Prometheus adds +Inf implicitly.
+	sqLatencySLOBuckets = []float64{25, 50, 75, 100, 150, 200, 250, 300, 500}
+
 	// longTaskBuckets provides long task duration in milliseconds
 	longTaskBuckets = []float64{1, 100, 500, 1000, 5000, 10000, 20000, 50000, 100000, 250000, 500000, 1000000, 3600000, 5000000, 10000000} // unit milliseconds
 
