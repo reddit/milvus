@@ -91,6 +91,16 @@ var (
 			NativeHistogramMinResetDuration: time.Hour,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
+	// ProxySQLatencySLO records search/query latency with SLO-oriented classic histogram buckets.
+	ProxySQLatencySLO = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "sq_latency_slo",
+			Help:      "latency of successful search or query requests, with SLO-oriented classic histogram buckets",
+			Buckets:   sqLatencySLOBuckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
+
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
 	// Deprecated, ProxySQLatency instead of it
 	ProxyCollectionSQLatency = prometheus.NewHistogramVec(
@@ -516,6 +526,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxySQLatency)
 	registry.MustRegister(ProxySQLatencyGranular)
+	registry.MustRegister(ProxySQLatencySLO)
 	registry.MustRegister(ProxyCollectionSQLatency)
 	registry.MustRegister(ProxyMutationLatency)
 	registry.MustRegister(ProxyCollectionMutationLatency)
@@ -607,6 +618,10 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 	})
+	ProxySQLatencySLO.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
 	ProxyMutationLatency.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -639,6 +654,11 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		collectionName:    collection,
 	})
 	ProxySQLatencyGranular.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxySQLatencySLO.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 		collectionName:    collection,
