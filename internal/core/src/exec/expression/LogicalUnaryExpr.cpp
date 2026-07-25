@@ -15,9 +15,26 @@
 // limitations under the License.
 
 #include "LogicalUnaryExpr.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/ValueOp.h"
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        return std::dynamic_pointer_cast<RoaringBitmapVector>(row->child(0));
+    }
+
+    return nullptr;
+}
+
+}  // namespace
 
 void
 PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
@@ -29,7 +46,11 @@ PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     inputs_[0]->Eval(context, result);
     if (expr_->op_type_ == milvus::expr::LogicalUnaryExpr::OpType::LogicalNot) {
-        common::ThreeValuedLogicOp::Not(GetColumnVector(result));
+        if (auto roaring = GetRoaringBitmapVector(result)) {
+            roaring->Flip();
+        } else {
+            common::ThreeValuedLogicOp::Not(GetColumnVector(result));
+        }
     }
 }
 

@@ -15,9 +15,34 @@
 // limitations under the License.
 
 #include "LogicalBinaryExpr.h"
+#include "common/RoaringBitmapVector.h"
 
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        return std::dynamic_pointer_cast<RoaringBitmapVector>(row->child(0));
+    }
+
+    return nullptr;
+}
+
+RoaringBitmapVectorPtr
+GetLogicalRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = GetRoaringBitmapVector(input)) {
+        return roaring;
+    }
+    return RoaringBitmapVector::FromColumnVector(GetColumnVector(input));
+}
+
+}  // namespace
 
 void
 PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
@@ -31,6 +56,25 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     inputs_[0]->Eval(context, left);
     VectorPtr right;
     inputs_[1]->Eval(context, right);
+
+    auto left_roaring = GetRoaringBitmapVector(left);
+    auto right_roaring = GetRoaringBitmapVector(right);
+    if (left_roaring != nullptr || right_roaring != nullptr) {
+        left_roaring = GetLogicalRoaringBitmapVector(left);
+        right_roaring = GetLogicalRoaringBitmapVector(right);
+        if (expr_->op_type_ == expr::LogicalBinaryExpr::OpType::And) {
+            left_roaring->And(*right_roaring);
+        } else if (expr_->op_type_ == expr::LogicalBinaryExpr::OpType::Or) {
+            left_roaring->Or(*right_roaring);
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "unsupported logical operator: {}",
+                      expr_->GetOpTypeString());
+        }
+        result = std::move(left_roaring);
+        return;
+    }
+
     auto lflat = GetColumnVector(left);
     auto rflat = GetColumnVector(right);
     auto size = left->size();
@@ -51,7 +95,7 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     TargetBitmapView rvalid_view(rflat->GetValidRawData(), size);
     LogicalElementFunc<LogicalOpType::Or> func;
     func(lvalid_view, rvalid_view, size);
-    result = std::move(left);
+    result = std::move(lflat);
 }
 
 }  //namespace exec

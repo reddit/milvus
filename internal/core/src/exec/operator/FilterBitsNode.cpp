@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "FilterBitsNode.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/Tracer.h"
 #include "expr/ITypeExpr.h"
 #include "fmt/format.h"
@@ -23,6 +24,27 @@
 
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        auto child = row->child(0);
+        if (auto roaring =
+                std::dynamic_pointer_cast<RoaringBitmapVector>(child)) {
+            return roaring;
+        }
+    }
+
+    return nullptr;
+}
+
+}  // namespace
+
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
     DriverContext* driverctx,
@@ -71,14 +93,12 @@ PhyFilterBitsNode::GetOutput() {
     }
 
     // Fast path: AlwaysTrueExpr means no filtering needed.
-    // Directly produce all-zero bitmap (no rows excluded) + all-one valid bitmap.
+    // Directly produce an empty roaring bitmap: no rows excluded.
     if (is_always_true_) {
         num_processed_rows_ = need_process_rows_;
-        TargetBitmap bitset(need_process_rows_, false);
-        TargetBitmap valid_bitset(need_process_rows_, true);
         std::vector<VectorPtr> col_res;
-        col_res.push_back(std::make_shared<ColumnVector>(
-            std::move(bitset), std::move(valid_bitset)));
+        col_res.push_back(
+            std::make_shared<RoaringBitmapVector>(need_process_rows_, true));
         return std::make_shared<RowVector>(col_res);
     }
 
@@ -91,8 +111,11 @@ PhyFilterBitsNode::GetOutput() {
 
     EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
 
-    TargetBitmap bitset;
     TargetBitmap valid_bitset;
+    auto roaring_bitset =
+        std::make_shared<RoaringBitmapVector>(need_process_rows_, true);
+    bool roaring_valid_values_all_valid = true;
+    size_t roaring_valid_values_size = 0;
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -100,15 +123,41 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result size should be size one and not "
                    "be nullptr");
 
-        if (auto col_vec =
-                std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
+        if (auto roaring_vec = GetRoaringBitmapVector(results_[0])) {
+            roaring_bitset->OrShifted(*roaring_vec, num_processed_rows_);
+            if (roaring_valid_values_all_valid &&
+                roaring_vec->valid_values_all_valid()) {
+                roaring_valid_values_size += roaring_vec->size();
+            } else {
+                if (roaring_valid_values_all_valid) {
+                    valid_bitset.append(
+                        TargetBitmap(roaring_valid_values_size, true));
+                    roaring_valid_values_all_valid = false;
+                }
+                roaring_vec->AppendValidValuesTo(
+                    valid_bitset, 0, roaring_vec->size());
+                roaring_valid_values_size += roaring_vec->size();
+            }
+            num_processed_rows_ += roaring_vec->size();
+        } else if (auto col_vec =
+                       std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
                 TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                bitset.append(view);
+                roaring_bitset->OrShifted(view, num_processed_rows_);
                 TargetBitmapView valid_view(col_vec->GetValidRawData(),
                                             col_vec_size);
-                valid_bitset.append(valid_view);
+                if (roaring_valid_values_all_valid && valid_view.all()) {
+                    roaring_valid_values_size += col_vec_size;
+                } else {
+                    if (roaring_valid_values_all_valid) {
+                        valid_bitset.append(
+                            TargetBitmap(roaring_valid_values_size, true));
+                        roaring_valid_values_all_valid = false;
+                    }
+                    valid_bitset.append(valid_view);
+                    roaring_valid_values_size += col_vec_size;
+                }
                 num_processed_rows_ += col_vec_size;
             } else {
                 ThrowInfo(ExprInvalid,
@@ -119,17 +168,14 @@ PhyFilterBitsNode::GetOutput() {
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
-    bitset.flip();
-    AssertInfo(bitset.size() == need_process_rows_,
+    roaring_bitset->Flip();
+    if (!roaring_valid_values_all_valid) {
+        roaring_bitset->set_valid_values(std::move(valid_bitset));
+    }
+    AssertInfo(roaring_bitset->size() == need_process_rows_,
                "bitset size: {}, need_process_rows_: {}",
-               bitset.size(),
+               roaring_bitset->size(),
                need_process_rows_);
-    Assert(valid_bitset.size() == need_process_rows_);
-
-    // num_processed_rows_ = need_process_rows_;
-    std::vector<VectorPtr> col_res;
-    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
-                                                     std::move(valid_bitset)));
     std::chrono::high_resolution_clock::time_point scalar_end =
         std::chrono::high_resolution_clock::now();
     double scalar_cost =
@@ -138,6 +184,8 @@ PhyFilterBitsNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
 
+    std::vector<VectorPtr> col_res;
+    col_res.push_back(std::move(roaring_bitset));
     return std::make_shared<RowVector>(col_res);
 }
 

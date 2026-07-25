@@ -15,10 +15,40 @@
 // limitations under the License.
 
 #include "ConjunctExpr.h"
+#include "common/RoaringBitmapVector.h"
 #include "common/ValueOp.h"
 
 namespace milvus {
 namespace exec {
+namespace {
+
+RoaringBitmapVectorPtr
+GetRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = std::dynamic_pointer_cast<RoaringBitmapVector>(input)) {
+        return roaring;
+    }
+
+    if (auto row = std::dynamic_pointer_cast<RowVector>(input)) {
+        return std::dynamic_pointer_cast<RoaringBitmapVector>(row->child(0));
+    }
+
+    return nullptr;
+}
+
+RoaringBitmapVectorPtr
+GetLogicalRoaringBitmapVector(const VectorPtr& input) {
+    if (auto roaring = GetRoaringBitmapVector(input)) {
+        return roaring;
+    }
+    return RoaringBitmapVector::FromColumnVector(GetColumnVector(input));
+}
+
+bool
+CanSkipFollowingRoaringExprs(const RoaringBitmapVectorPtr& vec, bool is_and) {
+    return is_and ? vec->AllFalse() : vec->AllTrue();
+}
+
+}  // namespace
 
 DataType
 PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
@@ -96,6 +126,15 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         inputs_[input_order_[i]]->Eval(context, input_result);
         if (i == 0) {
             result = input_result;
+            if (auto roaring_result = GetRoaringBitmapVector(result)) {
+                if (CanSkipFollowingRoaringExprs(roaring_result, is_and_)) {
+                    SkipFollowingExprs(i + 1);
+                    ClearBitmapInput(context);
+                    return;
+                }
+                ClearBitmapInput(context);
+                continue;
+            }
             auto all_flat_result = GetColumnVector(result);
             if (CanSkipFollowingExprs(all_flat_result)) {
                 SkipFollowingExprs(i + 1);
@@ -105,8 +144,30 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             SetNextExprBitmapInput(all_flat_result, context);
             continue;
         }
+
+        auto input_roaring = GetRoaringBitmapVector(input_result);
+        auto all_roaring = GetRoaringBitmapVector(result);
+        if (input_roaring != nullptr || all_roaring != nullptr) {
+            input_roaring = GetLogicalRoaringBitmapVector(input_result);
+            all_roaring = GetLogicalRoaringBitmapVector(result);
+            if (is_and_) {
+                all_roaring->And(*input_roaring);
+            } else {
+                all_roaring->Or(*input_roaring);
+            }
+            result = all_roaring;
+            if (CanSkipFollowingRoaringExprs(all_roaring, is_and_)) {
+                SkipFollowingExprs(i + 1);
+                ClearBitmapInput(context);
+                return;
+            }
+            ClearBitmapInput(context);
+            continue;
+        }
+
         auto input_flat_result = GetColumnVector(input_result);
         auto all_flat_result = GetColumnVector(result);
+        result = all_flat_result;
         auto active_rows =
             UpdateResult(input_flat_result, context, all_flat_result);
         if (active_rows == 0) {
