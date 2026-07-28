@@ -28,6 +28,7 @@
 #include "knowhere/index/index_node.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/ConcurrentVector.h"
 #include "common/Span.h"
 #include "query/Utils.h"
@@ -174,13 +175,11 @@ class SealedDataGetter : public DataGetter<OutputType> {
  private:
     milvus::OpContext* op_ctx_;
     const segcore::SegmentSealed& segment_;
+    const segcore::ChunkedSegmentSealedImpl* chunked_segment_;
     const FieldId field_id_;
     bool from_data_;
 
-    mutable std::unordered_map<
-        int64_t,
-        PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>>
-        str_pw_map;
+    mutable std::unordered_map<int64_t, PinWrapper<StringChunk*>> str_pw_map;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
     // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
@@ -196,7 +195,14 @@ class SealedDataGetter : public DataGetter<OutputType> {
                      std::optional<std::string> json_path,
                      std::optional<DataType> json_type,
                      bool strict_cast)
-        : op_ctx_(op_ctx), segment_(segment), field_id_(field_id) {
+        : op_ctx_(op_ctx),
+          segment_(segment),
+          chunked_segment_(
+              dynamic_cast<const segcore::ChunkedSegmentSealedImpl*>(&segment)),
+          field_id_(field_id) {
+        AssertInfo(chunked_segment_ != nullptr,
+                   "sealed group by string chunk path requires chunked sealed "
+                   "segment");
         from_data_ = segment_.HasFieldData(field_id_);
         if (!from_data_) {
             auto index = segment_.PinIndex(op_ctx_, field_id_);
@@ -223,17 +229,16 @@ class SealedDataGetter : public DataGetter<OutputType> {
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<InnerRawType, std::string>) {
                 if (str_pw_map.find(chunk_id) == str_pw_map.end()) {
-                    // for now, search_group_by does not handle null values
-                    auto pw = segment_.chunk_view<std::string_view>(
+                    auto pw = chunked_segment_->string_chunk(
                         op_ctx_, field_id_, chunk_id);
                     str_pw_map[chunk_id] = std::move(pw);
                 }
                 auto& pw = str_pw_map[chunk_id];
-                auto& [str_chunk_view, valid_data] = pw.get();
-                if (!valid_data.empty() && !valid_data[inner_offset]) {
+                auto* str_chunk = pw.get();
+                if (!str_chunk->isValid(inner_offset)) {
                     return std::nullopt;
                 }
-                std::string_view str_val_view = str_chunk_view[inner_offset];
+                std::string_view str_val_view = (*str_chunk)[inner_offset];
                 return std::string(str_val_view.data(), str_val_view.length());
             } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
                 if (json_pw_map.find(chunk_id) == json_pw_map.end()) {

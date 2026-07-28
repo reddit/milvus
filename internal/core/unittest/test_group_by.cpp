@@ -10,9 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <unordered_set>
+
 #include "common/Schema.h"
 #include "query/Plan.h"
 
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/reduce_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
@@ -254,6 +257,16 @@ TEST(GroupBY, SealedIndex) {
 
     //8. search group by string
     {
+        auto string_data = raw_data.get_col<std::string>(str_fid);
+        OpContext op_ctx;
+        auto chunked_segment =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(chunked_segment, nullptr);
+        auto chunk0 = chunked_segment->string_chunk(&op_ctx, str_fid, 0);
+        ASSERT_GT(chunk0.get()->RowNums(), 0);
+        auto first_view = (*chunk0.get())[0];
+        ASSERT_EQ(std::string(first_view), string_data[0]);
+
         auto plan_str =
             handle.ParseGroupBySearch("",         // empty filter expression
                                       "fakevec",  // vector field name
@@ -399,6 +412,8 @@ TEST(GroupBY, SealedData) {
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto nullable_str_fid =
+        schema->AddDebugField("nullable_string", DataType::VARCHAR, true);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 100;
@@ -464,6 +479,56 @@ TEST(GroupBY, SealedData) {
             ASSERT_TRUE(it.second == group_size)
                 << "unexpected count on group " << it.first;
         }
+    }
+
+    //4. search group by nullable string
+    {
+        auto plan_str = handle.ParseGroupBySearch(
+            "",                      // empty filter expression
+            "fakevec",               // vector field name
+            topK,                    // topk
+            "L2",                    // metric type
+            "{\"ef\": 10}",          // search params
+            nullable_str_fid.get(),  // group_by_field_id
+            group_size,             // group_size
+            "",                     // json_path (not used)
+            milvus::proto::schema::DataType::None,  // json_type (not used)
+            true                                  // strict_group_size
+        );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+        CheckGroupBySearchResult(*search_result, topK, 1, false);
+
+        const auto string_data =
+            raw_data.get_col<std::string>(nullable_str_fid);
+        const auto valid_data = raw_data.get_col_valid(nullable_str_fid);
+        std::unordered_set<std::string> expected_groups;
+        for (size_t i = 0; i < string_data.size(); ++i) {
+            if (valid_data[i]) {
+                expected_groups.insert(string_data[i]);
+            }
+        }
+
+        std::unordered_map<std::string, int> group_counts;
+        int null_count = 0;
+        for (const auto& value : search_result->group_by_values_.value()) {
+            if (value.has_value()) {
+                group_counts[std::get<std::string>(value.value())]++;
+            } else {
+                null_count++;
+            }
+        }
+
+        ASSERT_EQ(group_counts.size(), expected_groups.size());
+        for (const auto& group : expected_groups) {
+            ASSERT_EQ(group_counts[group], group_size) << group;
+        }
+        ASSERT_EQ(null_count, group_size);
     }
 }
 
