@@ -13,6 +13,7 @@
 #include "common/Schema.h"
 #include "query/Plan.h"
 
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/reduce_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
@@ -254,6 +255,16 @@ TEST(GroupBY, SealedIndex) {
 
     //8. search group by string
     {
+        auto string_data = raw_data.get_col<std::string>(str_fid);
+        OpContext op_ctx;
+        auto chunked_segment =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(chunked_segment, nullptr);
+        auto chunk0 = chunked_segment->string_chunk(&op_ctx, str_fid, 0);
+        ASSERT_GT(chunk0.get()->RowNums(), 0);
+        auto first_view = (*chunk0.get())[0];
+        ASSERT_EQ(std::string(first_view), string_data[0]);
+
         auto plan_str =
             handle.ParseGroupBySearch("",         // empty filter expression
                                       "fakevec",  // vector field name

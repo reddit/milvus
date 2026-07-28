@@ -742,6 +742,22 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
               "chunk_view_by_offsets only used for variable column field ");
 }
 
+PinWrapper<StringChunk*>
+ChunkedSegmentSealedImpl::string_chunk(milvus::OpContext* op_ctx,
+                                       FieldId field_id,
+                                       int64_t chunk_id) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(field_id)) {
+        auto pw = column->GetChunk(op_ctx, chunk_id);
+        return PinWrapper<StringChunk*>(
+            pw, static_cast<StringChunk*>(pw.get()));
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "string_chunk_impl only used for variable column field ");
+}
+
 PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     milvus::OpContext* op_ctx,
