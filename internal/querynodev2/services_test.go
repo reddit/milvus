@@ -157,26 +157,36 @@ func (suite *ServiceSuite) SetupTest() {
 }
 
 func (suite *ServiceSuite) TearDownTest() {
+	if suite.node == nil {
+		return
+	}
+
 	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
 	ctx := context.Background()
 	// ReleaseSegment, avoid throwing an instance of 'std::system_error' when stop node
-	resp, err := suite.node.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ReleaseSegments,
-			TargetID: suite.node.session.ServerID,
-		},
-		CollectionID: suite.collectionID,
-		PartitionIDs: suite.partitionIDs,
-		SegmentIDs:   suite.validSegmentIDs,
-		NodeID:       suite.node.session.ServerID,
-		Scope:        querypb.DataScope_All,
-		Shard:        suite.vchannel,
-	})
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	suite.node.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
+	if suite.node.session != nil && suite.node.manager != nil {
+		resp, err := suite.node.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_ReleaseSegments,
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID: suite.collectionID,
+			PartitionIDs: suite.partitionIDs,
+			SegmentIDs:   suite.validSegmentIDs,
+			NodeID:       suite.node.session.ServerID,
+			Scope:        querypb.DataScope_All,
+			Shard:        suite.vchannel,
+		})
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	}
+	if suite.node.chunkManager != nil {
+		suite.node.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
+	}
 	suite.node.Stop()
-	suite.etcdClient.Close()
+	if suite.etcdClient != nil {
+		suite.etcdClient.Close()
+	}
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 }
 

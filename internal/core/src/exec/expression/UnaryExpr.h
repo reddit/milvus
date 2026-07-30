@@ -281,6 +281,32 @@ struct UnaryElementFunc {
                     }
                 }
                 return;
+            } else {
+                for (int i = 0; i < size; ++i) {
+                    if (!bitmap_input[i + start_cursor]) {
+                        continue;
+                    }
+                    if constexpr (op == proto::plan::OpType::Equal) {
+                        res[i] = src[i] == val;
+                    } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                        res[i] = src[i] != val;
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterThan) {
+                        res[i] = src[i] > val;
+                    } else if constexpr (op == proto::plan::OpType::LessThan) {
+                        res[i] = src[i] < val;
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterEqual) {
+                        res[i] = src[i] >= val;
+                    } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                        res[i] = src[i] <= val;
+                    } else {
+                        ThrowInfo(OpTypeInvalid,
+                                  "unsupported op_type:{} for UnaryElementFunc",
+                                  op);
+                    }
+                }
+                return;
             }
         }
 

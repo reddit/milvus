@@ -181,11 +181,19 @@ func (suite *RetrieveSuite) SetupTest() {
 }
 
 func (suite *RetrieveSuite) TearDownTest() {
-	suite.sealed.Release(context.Background())
-	suite.growing.Release(context.Background())
-	DeleteCollection(suite.collection)
+	if suite.sealed != nil {
+		suite.sealed.Release(context.Background())
+	}
+	if suite.growing != nil {
+		suite.growing.Release(context.Background())
+	}
+	if suite.collection != nil {
+		DeleteCollection(suite.collection)
+	}
 	ctx := context.Background()
-	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	if suite.chunkManager != nil {
+		suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	}
 }
 
 func (suite *RetrieveSuite) TestRetrieveSealed() {

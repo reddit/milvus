@@ -158,12 +158,16 @@ func (s *IndexServiceSuite) SetupTest() {
 }
 
 func (s *IndexServiceSuite) TearDownSuite() {
-	err := s.cm.RemoveWithPrefix(context.Background(), "index-service-ut")
-	s.NoError(err)
+	if s.cm != nil {
+		err := s.cm.RemoveWithPrefix(context.Background(), "index-service-ut")
+		s.NoError(err)
+	}
 	paramtable.Get().MinioCfg.RootPath.SwapTempValue("files")
 
-	err = s.node.Stop()
-	s.NoError(err)
+	if s.node != nil {
+		err := s.node.Stop()
+		s.NoError(err)
+	}
 }
 
 func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {

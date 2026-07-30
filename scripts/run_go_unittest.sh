@@ -21,6 +21,7 @@ set -e
 
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
+set -e
 
 if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0
@@ -78,7 +79,13 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/kv/.
 
 function test_mq()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast -count=1 -ldflags="-r ${RPATH}"
+mq_pkgs=()
+while IFS= read -r pkg; do
+    mq_pkgs+=("$pkg")
+done < <(go list "${MILVUS_DIR}/mq/..." 2>/dev/null | grep -v kafka || true)
+if ((${#mq_pkgs[@]})); then
+    go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${mq_pkgs[@]}" -failfast -count=1 -ldflags="-r ${RPATH}"
+fi
 }
 
 function test_storage()
@@ -178,6 +185,7 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/cdc/
 
 function test_all()
 {
+test_cmd
 test_proxy
 test_querynode
 test_datanode
@@ -192,7 +200,6 @@ test_tso
 test_util
 test_pkg
 test_metastore
-test_cmd
 test_streaming
 test_mixcoord
 test_cdc

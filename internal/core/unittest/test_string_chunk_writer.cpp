@@ -38,6 +38,24 @@ BuildBinaryArray(const std::vector<std::optional<std::string>>& values) {
     return std::static_pointer_cast<arrow::BinaryArray>(arr);
 }
 
+std::shared_ptr<arrow::StringArray>
+BuildStringArray(const std::vector<std::optional<std::string>>& values) {
+    arrow::StringBuilder builder;
+    for (const auto& v : values) {
+        if (v.has_value()) {
+            auto st = builder.Append(v->data(), v->size());
+            ASSERT_TRUE(st.ok());
+        } else {
+            auto st = builder.AppendNull();
+            ASSERT_TRUE(st.ok());
+        }
+    }
+    std::shared_ptr<arrow::Array> arr;
+    auto st = builder.Finish(&arr);
+    EXPECT_TRUE(st.ok());
+    return std::static_pointer_cast<arrow::StringArray>(arr);
+}
+
 }  // namespace
 
 TEST(StringChunkWriterTest, NoNullsMultiBatches) {
@@ -121,5 +139,29 @@ TEST(StringChunkWriterTest, WithNullsMergedBitmap) {
         if (expect_valid) {
             EXPECT_EQ((*chunk)[i], all[static_cast<size_t>(i)].value());
         }
+    }
+}
+
+TEST(StringChunkWriterTest, AcceptsStringArray) {
+    std::vector<std::optional<std::string>> values = {
+        std::string("alpha"),
+        std::string(""),
+        std::string("varchar"),
+        std::string("omega"),
+    };
+
+    arrow::ArrayVector vec{BuildStringArray(values)};
+
+    StringChunkWriter writer(/*nullable=*/false);
+    writer.write(vec);
+    auto chunk_up = writer.finish();
+
+    auto* chunk = dynamic_cast<StringChunk*>(chunk_up.get());
+    ASSERT_NE(chunk, nullptr);
+    ASSERT_EQ(chunk->RowNums(), static_cast<int64_t>(values.size()));
+
+    for (int i = 0; i < static_cast<int>(values.size()); ++i) {
+        ASSERT_TRUE(chunk->isValid(i));
+        EXPECT_EQ((*chunk)[i], values[static_cast<size_t>(i)].value());
     }
 }

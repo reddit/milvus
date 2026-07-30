@@ -18,8 +18,10 @@
 #include "common/Consts.h"
 #include "expr/ITypeExpr.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Utils.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
+#include <typeinfo>
 
 namespace milvus::test {
 
@@ -170,7 +172,64 @@ gen_filter_res(milvus::plan::PlanNode* plan_node,
     eval_ctx.set_offset_input(offsets);
     exprs_->Eval(0, 1, true, eval_ctx, results_);
 
-    auto col_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(results_[0]);
+    if (results_.empty() || results_[0] == nullptr) {
+        auto size = offsets == nullptr ? active_count : offsets->size();
+        return std::make_shared<milvus::ColumnVector>(
+            TargetBitmap(size, false), TargetBitmap(size, true));
+    }
+    if (typeid(*results_[0]) == typeid(milvus::ColumnVector)) {
+        return std::static_pointer_cast<milvus::ColumnVector>(results_[0]);
+    }
+    if (std::dynamic_pointer_cast<milvus::RowVector>(results_[0])) {
+        return milvus::exec::GetColumnVector(results_[0]);
+    }
+    if (auto constant =
+            std::dynamic_pointer_cast<milvus::ConstantVector<bool>>(
+                results_[0])) {
+        auto size = constant->size();
+        auto valid = !constant->IsNull();
+        auto value = constant->GetValue() && valid;
+        return std::make_shared<milvus::ColumnVector>(
+            TargetBitmap(size, value),
+            TargetBitmap(size, valid));
+    }
+    if (auto simple = std::dynamic_pointer_cast<milvus::SimpleVector>(
+            results_[0])) {
+        auto size = simple->size();
+        TargetBitmap bitmap(size, false);
+        TargetBitmap valid_bitmap(size, false);
+        for (auto i = 0; i < size; ++i) {
+            auto valid = simple->ValidAt(i);
+            valid_bitmap.set(i, valid);
+            if (!valid) {
+                continue;
+            }
+            bool value = false;
+            switch (simple->type()) {
+                case DataType::NONE:
+                    value = *static_cast<int8_t*>(
+                                simple->RawValueAt(i, sizeof(int8_t))) != 0;
+                    break;
+                case DataType::BOOL:
+                    value =
+                        *static_cast<bool*>(simple->RawValueAt(i, sizeof(bool)));
+                    break;
+                case DataType::INT8:
+                    value = *static_cast<int8_t*>(
+                                simple->RawValueAt(i, sizeof(int8_t))) != 0;
+                    break;
+                default:
+                    ThrowInfo(
+                        UnexpectedError,
+                        "expr result simple vector must be bool-like, got {}",
+                        static_cast<int>(simple->type()));
+            }
+            bitmap.set(i, value);
+        }
+        return std::make_shared<milvus::ColumnVector>(std::move(bitmap),
+                                                      std::move(valid_bitmap));
+    }
+    auto col_vec = milvus::exec::GetColumnVector(results_[0]);
     return col_vec;
 }
 

@@ -2121,6 +2121,7 @@ func WithMeta(meta *meta) Option {
 }
 
 func newTestServer(t *testing.T, opts ...Option) *Server {
+	t.Helper()
 	var err error
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	paramtable.Get().Save(Params.RocksmqCfg.CompressionTypes.Key, "0,0,0,0,0")

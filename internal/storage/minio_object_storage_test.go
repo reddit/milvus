@@ -47,11 +47,17 @@ func TestMinioObjectStorage(t *testing.T) {
 		CloudProvider: "minio",
 	}
 
+	newWithShortTimeout := func(config *objectstorage.Config) (*MinioObjectStorage, error) {
+		timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		return newMinioObjectStorageWithConfig(timeoutCtx, config)
+	}
+
 	t.Run("test initialize", func(t *testing.T) {
 		var err error
 		bucketName := config.BucketName
 		config.BucketName = ""
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		_, err = newWithShortTimeout(&config)
 		assert.Error(t, err)
 		config.BucketName = bucketName
 		_, err = newMinioObjectStorageWithConfig(ctx, &config)
@@ -202,17 +208,22 @@ func TestMinioObjectStorage(t *testing.T) {
 
 	t.Run("test useIAM", func(t *testing.T) {
 		var err error
+		iamEndpoint := config.IAMEndpoint
 		config.UseIAM = true
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		config.IAMEndpoint = "http://127.0.0.1:1"
+		defer func() {
+			config.UseIAM = false
+			config.IAMEndpoint = iamEndpoint
+		}()
+		_, err = newWithShortTimeout(&config)
 		assert.Error(t, err)
-		config.UseIAM = false
 	})
 
 	t.Run("test ssl", func(t *testing.T) {
 		var err error
 		config.UseSSL = true
 		config.SslCACert = "/tmp/dummy.crt"
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		_, err = newWithShortTimeout(&config)
 		assert.Error(t, err)
 		config.UseSSL = false
 	})
@@ -222,10 +233,10 @@ func TestMinioObjectStorage(t *testing.T) {
 		cloudProvider := config.CloudProvider
 		config.CloudProvider = "aliyun"
 		config.UseIAM = true
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		_, err = newWithShortTimeout(&config)
 		assert.Error(t, err)
 		config.UseIAM = false
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		_, err = newWithShortTimeout(&config)
 		assert.Error(t, err)
 		config.CloudProvider = "gcp"
 		_, err = newMinioObjectStorageWithConfig(ctx, &config)

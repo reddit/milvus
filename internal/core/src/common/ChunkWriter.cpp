@@ -27,6 +27,20 @@
 
 namespace milvus {
 
+template <typename ArrayType, typename Visitor>
+bool
+VisitStringLikeArray(const std::shared_ptr<arrow::Array>& data,
+                     Visitor&& visitor) {
+    auto array = std::dynamic_pointer_cast<ArrayType>(data);
+    if (array == nullptr) {
+        return false;
+    }
+    for (int i = 0; i < array->length(); i++) {
+        visitor(array->GetView(i));
+    }
+    return true;
+}
+
 std::pair<size_t, size_t>
 StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     row_nums_ = 0;
@@ -34,13 +48,11 @@ StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     // tuple <data, size, offset>
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
-        // for bson, we use binary array to store the string
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            size += str.size();
-        }
-        row_nums_ += array->length();
+        auto add_size = [&size](auto str) { size += str.size(); };
+        auto ok = VisitStringLikeArray<arrow::BinaryArray>(data, add_size) ||
+                  VisitStringLikeArray<arrow::StringArray>(data, add_size);
+        AssertInfo(ok, "StringChunkWriter expects binary or string array");
+        row_nums_ += data->length();
     }
     if (nullable_) {
         size += (row_nums_ + 7) / 8;
@@ -57,12 +69,11 @@ StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
     // tuple <data, size, offset>
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
-        // for bson, we use binary array to store the string
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            strs_.emplace_back(str);
-        }
+        auto append_string = [this](auto str) { strs_.emplace_back(str); };
+        auto ok =
+            VisitStringLikeArray<arrow::BinaryArray>(data, append_string) ||
+            VisitStringLikeArray<arrow::StringArray>(data, append_string);
+        AssertInfo(ok, "StringChunkWriter expects binary or string array");
         if (nullable_) {
             null_bitmaps.emplace_back(
                 data->null_bitmap_data(), data->length(), data->offset());

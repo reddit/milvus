@@ -69,6 +69,28 @@ func TestClientBase_GetRole(t *testing.T) {
 	assert.Equal(t, "", base.GetRole())
 }
 
+func TestClientBase_checkGrpcErr_ResourceExhausted(t *testing.T) {
+	base := ClientBase[*mockClient]{}
+
+	needRetry, needReset, forceReset, err := base.checkGrpcErr(
+		context.Background(),
+		status.Error(codes.ResourceExhausted, "grpc: received message larger than max (14 vs. 1)"),
+	)
+	assert.False(t, needRetry)
+	assert.False(t, needReset)
+	assert.False(t, forceReset)
+	assert.Error(t, err)
+
+	needRetry, needReset, forceReset, err = base.checkGrpcErr(
+		context.Background(),
+		status.Error(codes.ResourceExhausted, "resource quota exceeded"),
+	)
+	assert.True(t, needRetry)
+	assert.True(t, needReset)
+	assert.False(t, forceReset)
+	assert.Error(t, err)
+}
+
 func TestClientBase_connect(t *testing.T) {
 	t.Run("failed to connect", func(t *testing.T) {
 		base := ClientBase[*mockClient]{

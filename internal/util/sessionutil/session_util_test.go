@@ -932,6 +932,7 @@ func testForceKill(serverName string) {
 
 	// trigger a force kill
 	etcdCli.Revoke(context.Background(), *session.LeaseID)
+	session.checkKeepaliveTTL(time.Now().Add(time.Second))
 }
 
 func TestGetResourceGroupName(t *testing.T) {

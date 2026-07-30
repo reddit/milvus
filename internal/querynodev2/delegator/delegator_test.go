@@ -70,6 +70,7 @@ type DelegatorSuite struct {
 	replicaID     int64
 	vchannelName  string
 	version       int64
+	schemaVersion uint64
 	workerManager *cluster.MockManager
 	manager       *segments.Manager
 	loader        *segments.MockLoader
@@ -93,6 +94,7 @@ func (s *DelegatorSuite) SetupTest() {
 	s.replicaID = 65535
 	s.vchannelName = "rootcoord-dml_1000_v0"
 	s.version = 2000
+	s.schemaVersion = tsoutil.ComposeTSByTime(time.Now(), 0)
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -163,7 +165,7 @@ func (s *DelegatorSuite) SetupTest() {
 		},
 	}, &querypb.LoadMetaInfo{
 		PartitionIDs:  s.partitionIDs,
-		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
+		SchemaVersion: s.nextSchemaVersion(),
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
@@ -179,7 +181,15 @@ func (s *DelegatorSuite) SetupTest() {
 	s.Require().NoError(err)
 }
 
+func (s *DelegatorSuite) nextSchemaVersion() uint64 {
+	s.schemaVersion++
+	return s.schemaVersion
+}
+
 func (s *DelegatorSuite) TearDownTest() {
+	if s.delegator == nil {
+		return
+	}
 	s.delegator.Close()
 	s.delegator = nil
 }
@@ -208,7 +218,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101, 103}, // invalid output field
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.Error(err)
@@ -247,7 +257,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
@@ -1515,7 +1525,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1558,7 +1568,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1603,7 +1613,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 		s.ResetDelegator()
 
 		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1652,7 +1662,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1706,7 +1716,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 		s.ResetDelegator()
 
 		// two target with two analyzer
@@ -1748,7 +1758,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: s.nextSchemaVersion()})
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1757,6 +1767,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				{
 					FieldId:       100,
 					Texts:         []string{"test document"},
+					AnalyzerNames: []string{"default"},
 					SearchTextNum: 0,
 					CorpusTextNum: 1,
 				},

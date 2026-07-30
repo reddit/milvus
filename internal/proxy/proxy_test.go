@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
@@ -924,6 +925,10 @@ func TestProxy(t *testing.T) {
 	params.Save(params.CommonCfg.SessionTTL.Key, "300")
 	params.Save(params.CommonCfg.SessionRetryTimes.Key, "500")
 	params.Save(params.CommonCfg.GracefulStopTimeout.Key, "3600")
+	clusterPrefix := fmt.Sprintf("by-dev-test-%d", time.Now().UnixNano())
+	params.Save(params.CommonCfg.ClusterPrefix.Key, clusterPrefix)
+	params.Save(params.EtcdCfg.RootPath.Key, clusterPrefix)
+	kvfactory.CloseEtcdClient()
 
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
@@ -988,6 +993,7 @@ func TestProxy(t *testing.T) {
 
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
+	defer testServer.gracefulStop()
 
 	rootCoordClient, err := mixc.NewClient(ctx)
 	assert.NoError(t, err)

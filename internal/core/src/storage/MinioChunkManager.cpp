@@ -143,11 +143,9 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
             }
             return level;
         };
-        auto log_level = get_aws_log_level(log_level_str);
-        sdk_options_.loggingOptions.logLevel = log_level;
-        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
-            return std::make_shared<AwsLogger>(log_level);
-        };
+        get_aws_log_level(log_level_str);
+        sdk_options_.loggingOptions.logLevel =
+            Aws::Utils::Logging::LogLevel::Off;
         Aws::InitAPI(sdk_options_);
     }
 }
@@ -196,11 +194,9 @@ MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str,
             }
             return level;
         };
-        auto log_level = get_aws_log_level(log_level_str);
-        sdk_options_.loggingOptions.logLevel = log_level;
-        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
-            return std::make_shared<AwsLogger>(log_level);
-        };
+        get_aws_log_level(log_level_str);
+        sdk_options_.loggingOptions.logLevel =
+            Aws::Utils::Logging::LogLevel::Off;
         Aws::InitAPI(sdk_options_);
     }
 }
