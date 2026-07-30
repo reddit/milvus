@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -454,6 +455,12 @@ func TestCollectAllStatusWithEmptyResourceGroupAndDefaultRGAbsent(t *testing.T) 
 }
 
 func TestDial(t *testing.T) {
+	conn, err := net.DialTimeout("tcp", "localhost:2379", 200*time.Millisecond)
+	if err != nil {
+		t.Skip("etcd is not available")
+	}
+	_ = conn.Close()
+
 	paramtable.Init()
 
 	c, _ := kvfactory.GetEtcdAndPath()

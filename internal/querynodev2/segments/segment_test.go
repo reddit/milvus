@@ -141,10 +141,18 @@ func (suite *SegmentSuite) SetupTest() {
 
 func (suite *SegmentSuite) TearDownTest() {
 	ctx := context.Background()
-	suite.sealed.Release(context.Background())
-	suite.growing.Release(context.Background())
-	DeleteCollection(suite.collection)
-	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	if suite.sealed != nil {
+		suite.sealed.Release(context.Background())
+	}
+	if suite.growing != nil {
+		suite.growing.Release(context.Background())
+	}
+	if suite.collection != nil {
+		DeleteCollection(suite.collection)
+	}
+	if suite.chunkManager != nil {
+		suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	}
 }
 
 func (suite *SegmentSuite) TestLoadInfo() {

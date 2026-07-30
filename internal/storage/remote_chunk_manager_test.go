@@ -64,12 +64,18 @@ func newRemoteChunkManager(ctx context.Context, cloudProvider string, bucketName
 }
 
 func TestInitRemoteChunkManager(t *testing.T) {
+	if os.Getenv("AZURE_STORAGE_CONNECTION_STRING") == "" {
+		t.Skip("Azure remote chunk manager is not configured")
+	}
 	ctx := context.Background()
 	client, err := NewRemoteChunkManager(ctx, &objectstorage.Config{
-		BucketName:    Params.MinioCfg.BucketName.GetValue(),
-		CreateBucket:  true,
-		UseIAM:        false,
-		CloudProvider: "azure",
+		Address:           Params.MinioCfg.Address.GetValue(),
+		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
+		BucketName:        Params.MinioCfg.BucketName.GetValue(),
+		CreateBucket:      true,
+		UseIAM:            false,
+		CloudProvider:     "azure",
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
@@ -530,6 +536,9 @@ func TestMinioChunkManager(t *testing.T) {
 }
 
 func TestAzureChunkManager(t *testing.T) {
+	if os.Getenv("AZURE_STORAGE_CONNECTION_STRING") == "" {
+		t.Skip("Azure chunk manager is not configured")
+	}
 	testBucket := Params.MinioCfg.BucketName.GetValue()
 
 	configRoot := Params.MinioCfg.RootPath.GetValue()

@@ -1174,6 +1174,10 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
 }
 
 TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
+#ifndef BUILD_DISK_ANN
+    GTEST_SKIP() << "DiskANN support is disabled in this build";
+#endif
+
     const int64_t collection_id = 1;
     const int64_t partition_id = 2;
     const int64_t segment_id = 3002;

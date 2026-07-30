@@ -18,6 +18,7 @@ package etcd
 
 import (
 	"context"
+	"net"
 	"path"
 	"testing"
 
@@ -25,7 +26,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func portAvailable(address string) bool {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
+}
+
 func TestEtcd(t *testing.T) {
+	if !portAvailable("127.0.0.1:2379") || !portAvailable("127.0.0.1:2380") {
+		t.Skip("embedded etcd ports are not available")
+	}
 	err := InitEtcdServer(true, "", "/tmp/data", "stdout", "info")
 	assert.NoError(t, err)
 	defer StopEtcdServer()

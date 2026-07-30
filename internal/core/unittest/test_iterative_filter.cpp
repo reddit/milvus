@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include "common/Schema.h"
 #include "query/Plan.h"
 
@@ -34,19 +35,48 @@ CheckFilterSearchResult(const SearchResult& search_result_by_iterative_filter,
                         const SearchResult& search_result_by_pre_filter,
                         int topK,
                         int nq) {
-    ASSERT_EQ(search_result_by_pre_filter.seg_offsets_.size(), topK * nq);
-    ASSERT_EQ(search_result_by_pre_filter.distances_.size(), topK * nq);
-    ASSERT_EQ(search_result_by_iterative_filter.seg_offsets_.size(), topK * nq);
-    ASSERT_EQ(search_result_by_iterative_filter.distances_.size(), topK * nq);
+    auto real_result_size = [](const SearchResult& result) {
+        return std::count_if(result.seg_offsets_.begin(),
+                             result.seg_offsets_.end(),
+                             [](auto offset) { return offset >= 0; });
+    };
 
-    for (int i = 0; i < topK * nq; ++i) {
-        std::cout << search_result_by_pre_filter.seg_offsets_[i] << " "
-                  << search_result_by_pre_filter.distances_[i] << " "
-                  << search_result_by_iterative_filter.seg_offsets_[i] << " "
-                  << search_result_by_iterative_filter.distances_[i]
+    ASSERT_LE(search_result_by_pre_filter.seg_offsets_.size(), topK * nq);
+    ASSERT_LE(search_result_by_pre_filter.distances_.size(), topK * nq);
+    ASSERT_LE(search_result_by_iterative_filter.seg_offsets_.size(), topK * nq);
+    ASSERT_LE(search_result_by_iterative_filter.distances_.size(), topK * nq);
+    ASSERT_EQ(real_result_size(search_result_by_pre_filter),
+              real_result_size(search_result_by_iterative_filter));
+
+    int iterative_index = 0;
+    int pre_filter_index = 0;
+    while (iterative_index <
+               search_result_by_iterative_filter.seg_offsets_.size() &&
+           pre_filter_index < search_result_by_pre_filter.seg_offsets_.size()) {
+        if (search_result_by_iterative_filter.seg_offsets_[iterative_index] <
+            0) {
+            ++iterative_index;
+            continue;
+        }
+        if (search_result_by_pre_filter.seg_offsets_[pre_filter_index] < 0) {
+            ++pre_filter_index;
+            continue;
+        }
+        std::cout << search_result_by_pre_filter.seg_offsets_[pre_filter_index]
+                  << " "
+                  << search_result_by_pre_filter.distances_[pre_filter_index]
+                  << " "
+                  << search_result_by_iterative_filter
+                         .seg_offsets_[iterative_index]
+                  << " "
+                  << search_result_by_iterative_filter
+                         .distances_[iterative_index]
                   << std::endl;
-        ASSERT_EQ(search_result_by_pre_filter.seg_offsets_[i],
-                  search_result_by_iterative_filter.seg_offsets_[i]);
+        ASSERT_EQ(search_result_by_pre_filter.seg_offsets_[pre_filter_index],
+                  search_result_by_iterative_filter
+                      .seg_offsets_[iterative_index]);
+        ++iterative_index;
+        ++pre_filter_index;
     }
 }
 

@@ -29,6 +29,16 @@ PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     inputs_[0]->Eval(context, result);
     if (expr_->op_type_ == milvus::expr::LogicalUnaryExpr::OpType::LogicalNot) {
+        if (auto constant =
+                std::dynamic_pointer_cast<ConstantVector<bool>>(result)) {
+            result = std::make_shared<ConstantVector<bool>>(
+                DataType::BOOL,
+                constant->size(),
+                !constant->GetValue(),
+                constant->IsNull() ? std::optional<size_t>(constant->size())
+                                   : std::nullopt);
+            return;
+        }
         common::ThreeValuedLogicOp::Not(GetColumnVector(result));
     }
 }

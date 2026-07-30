@@ -61,6 +61,7 @@ func (s *SearchPipelineSuite) SetupTest() {
 }
 
 func (s *SearchPipelineSuite) TearDownTest() {
+	mockey.UnPatchAll()
 	s.span.End()
 }
 

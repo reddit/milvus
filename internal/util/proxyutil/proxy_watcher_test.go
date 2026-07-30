@@ -122,23 +122,21 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 		paramtable.Get().EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	defer etcdCli.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	sessKey := path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
+	assert.NoError(t, err)
+	defer etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
+
 	f1 := func(sess []*sessionutil.Session) {
 		t.Log("get sessions num", len(sess))
 	}
 	pm := NewProxyWatcher(etcdCli, f1)
 
-	eventCh := pm.etcdCli.Watch(
-		ctx,
-		path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
-		clientv3.WithPrefix(),
-		clientv3.WithCreatedNotify(),
-		clientv3.WithPrevKV(),
-		clientv3.WithRev(1),
-	)
+	eventCh := make(chan clientv3.WatchResponse, 1)
+	eventCh <- clientv3.WatchResponse{CompactRevision: 1}
 
 	for i := 1; i < 10; i++ {
 		k := path.Join(sessKey, typeutil.ProxyRole+strconv.FormatInt(int64(i), 10))
@@ -147,17 +145,7 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	// The reason there the error is no handle is that if you run compact twice, an error will be reported;
-	// error msg is "etcdserver: mvcc: required revision has been compacted"
-	etcdCli.Compact(ctx, 10)
-
 	assert.Panics(t, func() {
 		pm.startWatchEtcd(ctx, eventCh)
 	})
-
-	for i := 1; i < 10; i++ {
-		k := path.Join(sessKey, typeutil.ProxyRole+strconv.FormatInt(int64(i), 10))
-		_, err = etcdCli.Delete(ctx, k)
-		assert.NoError(t, err)
-	}
 }

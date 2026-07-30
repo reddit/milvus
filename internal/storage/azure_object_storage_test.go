@@ -38,10 +38,16 @@ func TestAzureObjectStorage(t *testing.T) {
 	ctx := context.Background()
 	bucketName := Params.MinioCfg.BucketName.GetValue()
 	config := objectstorage.Config{
-		BucketName:    bucketName,
-		CreateBucket:  true,
-		UseIAM:        false,
-		CloudProvider: "azure",
+		Address:           Params.MinioCfg.Address.GetValue(),
+		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
+		BucketName:        bucketName,
+		CreateBucket:      true,
+		UseIAM:            false,
+		CloudProvider:     "azure",
+	}
+	if os.Getenv("AZURE_STORAGE_CONNECTION_STRING") == "" {
+		t.Skip("Azure object storage is not configured")
 	}
 
 	t.Run("test initialize", func(t *testing.T) {
@@ -222,12 +228,18 @@ func TestReadFile(t *testing.T) {
 	ctx := context.Background()
 	bucketName := Params.MinioCfg.BucketName.GetValue()
 	c := &objectstorage.Config{
-		BucketName:    bucketName,
-		CreateBucket:  true,
-		UseIAM:        false,
-		CloudProvider: "azure",
+		Address:           Params.MinioCfg.Address.GetValue(),
+		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
+		BucketName:        bucketName,
+		CreateBucket:      true,
+		UseIAM:            false,
+		CloudProvider:     "azure",
 	}
 	rcm, err := NewRemoteChunkManager(ctx, c)
+	if err != nil || rcm == nil {
+		t.Skipf("Azure object storage is not available: %v", err)
+	}
 
 	t.Run("Read", func(t *testing.T) {
 		filePath := "test-Read"

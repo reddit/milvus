@@ -110,11 +110,7 @@ class ColumnVector final : public SimpleVector {
                                                              std::move(bitmap));
     }
 
-    virtual ~ColumnVector() override {
-        values_.reset();
-        valid_values_.reset();
-    }
-
+    virtual ~ColumnVector() override;
     void*
     RawValueAt(size_t index, size_t size_of_element) override {
         return reinterpret_cast<char*>(GetRawData()) + index * size_of_element;

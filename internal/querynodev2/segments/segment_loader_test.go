@@ -102,10 +102,14 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 
 func (suite *SegmentLoaderSuite) TearDownTest() {
 	ctx := context.Background()
-	for i := 0; i < suite.segmentNum; i++ {
-		suite.manager.Segment.Remove(context.Background(), suite.segmentID+int64(i), querypb.DataScope_All)
+	if suite.manager != nil && suite.manager.Segment != nil {
+		for i := 0; i < suite.segmentNum; i++ {
+			suite.manager.Segment.Remove(context.Background(), suite.segmentID+int64(i), querypb.DataScope_All)
+		}
 	}
-	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	if suite.chunkManager != nil {
+		suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+	}
 }
 
 func (suite *SegmentLoaderSuite) TestLoad() {
