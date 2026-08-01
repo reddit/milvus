@@ -26,6 +26,8 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 		echo "WARN: Cannot find $LIBJEMALLOC"
 	fi
 	export LD_LIBRARY_PATH=$PWD/internal/core/output/lib/:$LD_LIBRARY_PATH
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+	export DYLD_LIBRARY_PATH=$PWD/cmake_build/lib:$PWD/internal/core/output/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}
 fi
 
 echo "Starting standalone..."

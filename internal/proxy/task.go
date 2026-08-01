@@ -54,27 +54,29 @@ const (
 )
 
 const (
-	IgnoreGrowingKey     = "ignore_growing"
-	ReduceStopForBestKey = "reduce_stop_for_best"
-	IteratorField        = "iterator"
-	CollectionID         = "collection_id"
-	GroupByFieldKey      = "group_by_field"
-	GroupSizeKey         = "group_size"
-	StrictGroupSize      = "strict_group_size"
-	JSONPath             = "json_path"
-	JSONType             = "json_type"
-	StrictCastKey        = "strict_cast"
-	RankGroupScorer      = "rank_group_scorer"
-	AnnsFieldKey         = "anns_field"
-	AnalyzerKey          = "analyzer_name"
-	TopKKey              = "topk"
-	NQKey                = "nq"
-	MetricTypeKey        = common.MetricTypeKey
-	ParamsKey            = common.ParamsKey
-	ExprParamsKey        = "expr_params"
-	RoundDecimalKey      = "round_decimal"
-	OffsetKey            = "offset"
-	LimitKey             = "limit"
+	IgnoreGrowingKey           = "ignore_growing"
+	ReduceStopForBestKey       = "reduce_stop_for_best"
+	IteratorField              = "iterator"
+	CollectionID               = "collection_id"
+	GroupByFieldKey            = "group_by_field"
+	GroupSizeKey               = "group_size"
+	StrictGroupSize            = "strict_group_size"
+	GroupByRefillKey           = "group_by_refill"
+	GroupByRefillMaxRetriesKey = "group_by_refill_max_retries"
+	JSONPath                   = "json_path"
+	JSONType                   = "json_type"
+	StrictCastKey              = "strict_cast"
+	RankGroupScorer            = "rank_group_scorer"
+	AnnsFieldKey               = "anns_field"
+	AnalyzerKey                = "analyzer_name"
+	TopKKey                    = "topk"
+	NQKey                      = "nq"
+	MetricTypeKey              = common.MetricTypeKey
+	ParamsKey                  = common.ParamsKey
+	ExprParamsKey              = "expr_params"
+	RoundDecimalKey            = "round_decimal"
+	OffsetKey                  = "offset"
+	LimitKey                   = "limit"
 	// key for timestamptz translation
 	TimefieldsKey = "time_fields"
 
