@@ -33,6 +33,9 @@ done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 export MILVUS_WORK_DIR=$ROOT_DIR
 
+# Need this environment so that all go packages are compiled with the same toolchain
+export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.25.8}"
+
 unameOut="$(uname -s)"
 
 case "${unameOut}" in

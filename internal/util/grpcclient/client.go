@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -408,6 +409,17 @@ func (c *ClientBase[T]) needResetCancel() (needReset bool) {
 	return false
 }
 
+func isGrpcMessageSizeLimitErr(err error) bool {
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.ResourceExhausted {
+		return false
+	}
+
+	msg := st.Message()
+	return strings.Contains(msg, "grpc: received message larger than max") ||
+		strings.Contains(msg, "grpc: trying to send message larger than max")
+}
+
 func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry, needReset, forceReset bool, retErr error) {
 	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
 	// Unknown err
@@ -431,6 +443,8 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 		// old coord's side effect: when coord changed, the connection in coord's client won't reset automatically.
 		// so if new interface appear in new coord, will got a unimplemented error
 		return false, true, true, merr.WrapErrServiceUnimplemented(err)
+	case isGrpcMessageSizeLimitErr(err):
+		return false, false, false, err
 	case IsServerIDMismatchErr(err):
 		if c.isNode {
 			// Node connections: fast-fail to let shard client handle failover.

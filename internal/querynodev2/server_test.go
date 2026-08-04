@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -220,6 +221,9 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 
 func (suite *QueryNodeSuite) TestStop() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "2")
+	initcore.InitLocalChunkManager(suite.T().Name())
+	initcore.InitMmapManager(paramtable.Get(), 1)
+	initcore.InitTieredStorage(paramtable.Get())
 
 	suite.node.manager = segments.NewManager()
 

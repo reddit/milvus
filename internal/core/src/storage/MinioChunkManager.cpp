@@ -20,7 +20,9 @@
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
+#include <aws/core/utils/logging/AWSLogging.h>
 #include <aws/core/utils/logging/ConsoleLogSystem.h>
+#include <aws/core/utils/logging/CRTLogging.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -41,6 +43,27 @@
 #include "common/Consts.h"
 
 namespace milvus::storage {
+
+namespace {
+
+// MinioChunkManager intentionally keeps the AWS SDK initialized for the
+// lifetime of the process.  The SDK logging globals cannot be left installed,
+// though: CRT cleanup threads can still log while C++ static objects are being
+// destroyed, after the logging globals themselves have started teardown.
+class AwsLoggingShutdownGuard {
+ public:
+    ~AwsLoggingShutdownGuard() {
+        Aws::Utils::Logging::ShutdownCRTLogging();
+        Aws::Utils::Logging::ShutdownAWSLogging();
+    }
+};
+
+void
+RegisterAwsLoggingShutdown() {
+    static AwsLoggingShutdownGuard guard;
+}
+
+}  // namespace
 
 std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
@@ -145,10 +168,15 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         };
         auto log_level = get_aws_log_level(log_level_str);
         sdk_options_.loggingOptions.logLevel = log_level;
-        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
-            return std::make_shared<AwsLogger>(log_level);
-        };
+        if (log_level != Aws::Utils::Logging::LogLevel::Off) {
+            sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
+                return std::make_shared<AwsLogger>(log_level);
+            };
+        }
         Aws::InitAPI(sdk_options_);
+        if (log_level != Aws::Utils::Logging::LogLevel::Off) {
+            RegisterAwsLoggingShutdown();
+        }
     }
 }
 
@@ -198,10 +226,15 @@ MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str,
         };
         auto log_level = get_aws_log_level(log_level_str);
         sdk_options_.loggingOptions.logLevel = log_level;
-        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
-            return std::make_shared<AwsLogger>(log_level);
-        };
+        if (log_level != Aws::Utils::Logging::LogLevel::Off) {
+            sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
+                return std::make_shared<AwsLogger>(log_level);
+            };
+        }
         Aws::InitAPI(sdk_options_);
+        if (log_level != Aws::Utils::Logging::LogLevel::Off) {
+            RegisterAwsLoggingShutdown();
+        }
     }
 }
 

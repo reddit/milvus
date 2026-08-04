@@ -201,14 +201,18 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: fieldID, Name: "field0", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 					{FieldID: fieldID + 1, Name: "field1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
-					{FieldID: fieldID + 2, Name: "field2", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+					{FieldID: fieldID + 2, Name: "field2", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 				},
 				EnableDynamicField: false,
 				Properties:         nil,
 			},
 		}
 
-		s.Equal(int64(200*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
+		expectedSegmentSize := int64(100 * 1024 * 1024)
+		if s.triggerManager.meta.indexMeta.AllDenseWithDiskIndex(collection.ID, collection.Schema) {
+			expectedSegmentSize = 200 * 1024 * 1024
+		}
+		s.Equal(expectedSegmentSize, getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
 	})
 
 	s.Run("HNSW & DISKANN", func() {

@@ -1334,7 +1334,6 @@ func TestBalanceChecker_FilterCollectionForBalance_EdgeCases(t *testing.T) {
 
 	// Test with empty collection list
 	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{}).Build()
-	defer mockGetAll.UnPatch()
 
 	passAllFilter := func(ctx context.Context, collectionID int64) bool {
 		return true
@@ -1342,15 +1341,15 @@ func TestBalanceChecker_FilterCollectionForBalance_EdgeCases(t *testing.T) {
 
 	result := checker.filterCollectionForBalance(ctx, passAllFilter)
 	assert.Empty(t, result)
+	mockGetAll.UnPatch()
 
 	// Test with no filters
 	collectionIDs := []int64{1, 2, 3}
-	mockGetAll.UnPatch()
 	mockGetAll = mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
-	defer mockGetAll.UnPatch()
 
 	result = checker.filterCollectionForBalance(ctx)
 	assert.Equal(t, collectionIDs, result) // No filters means all pass
+	mockGetAll.UnPatch()
 }
 
 // =============================================================================

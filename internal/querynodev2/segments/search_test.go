@@ -136,10 +136,16 @@ func (suite *SearchSuite) SetupTest() {
 }
 
 func (suite *SearchSuite) TearDownTest() {
-	suite.sealed.Release(context.Background())
-	DeleteCollection(suite.collection)
+	if suite.sealed != nil {
+		suite.sealed.Release(context.Background())
+	}
+	if suite.collection != nil {
+		DeleteCollection(suite.collection)
+	}
 	ctx := context.Background()
-	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	if suite.chunkManager != nil {
+		suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	}
 }
 
 func (suite *SearchSuite) TestSearchSealed() {

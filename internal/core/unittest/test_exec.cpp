@@ -27,6 +27,7 @@
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 using namespace milvus;
 using namespace milvus::exec;
@@ -762,39 +763,11 @@ TEST(TaskTest, SkipIndexWithBitmapInputAlignment) {
     std::vector<milvus::plan::PlanNodePtr> sources;
     auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
         "plannode id 1", and_expr2, sources);
-    auto plan = plan::PlanFragment(filter_node);
 
-    auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        "test_skip_index_bitmap_alignment",
-        segment.get(),
-        chunk_size * 2,  // total rows
-        MAX_TIMESTAMP,
-        0,
-        0,
-        query::PlanOptions{false},
-        std::make_shared<milvus::exec::QueryConfig>(
-            std::unordered_map<std::string, std::string>{}));
+    auto final = ExecuteQueryExpr(
+        filter_node, segment.get(), chunk_size * 2, MAX_TIMESTAMP);
 
-    auto task = Task::Create("task_skip_index_bitmap", plan, 0, query_context);
-
-    int64_t total_rows = 0;
-    int64_t filtered_rows = 0;
-    for (;;) {
-        auto result = task->Next();
-        if (!result) {
-            break;
-        }
-        auto col_vec =
-            std::dynamic_pointer_cast<ColumnVector>(result->child(0));
-        if (col_vec && col_vec->IsBitmap()) {
-            TargetBitmapView view(col_vec->GetRawData(), col_vec->size());
-            total_rows += col_vec->size();
-            filtered_rows +=
-                view.count();  // These are filtered OUT (don't match)
-        }
-    }
-
-    int64_t num_matched = total_rows - filtered_rows;
+    int64_t num_matched = final.count();
 
     // Expected result: exactly 1 row should match
     // - Row at chunk 1, index 2 (global index 7) has:

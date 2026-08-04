@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -41,6 +42,7 @@ const (
 	CloudProviderAzure     = "azure"
 	CloudProviderTencent   = "tencent"
 	CloudProviderHuawei    = "huawei"
+	CloudProviderMinIO     = "minio"
 )
 
 var CheckBucketRetryAttempts uint = 20
@@ -49,6 +51,11 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 	var creds *credentials.Credentials
 	newMinioFn := minio.New
 	bucketLookupType := minio.BucketLookupAuto
+	isLocalMinIO := c.CloudProvider == CloudProviderMinIO
+
+	if isLocalMinIO && c.BucketName == "" {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
+	}
 
 	if c.UseVirtualHost {
 		bucketLookupType = minio.BucketLookupDNS
@@ -111,7 +118,12 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 	if matchedDefault {
 		// aws, minio
 		if c.UseIAM {
-			creds = credentials.NewIAM("")
+			iamEndpoint := ""
+			// Let explicit MinIO configs override the SDK's AWS IMDS default.
+			if isLocalMinIO {
+				iamEndpoint = c.IAMEndpoint
+			}
+			creds = credentials.NewIAM(iamEndpoint)
 		} else {
 			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
@@ -145,6 +157,22 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		}
 		tr.TLSClientConfig.MinVersion = minVer
 		minioOpts.Transport = tr
+	}
+
+	// Apply minio.requestTimeoutMs only to explicit MinIO clients.
+	if isLocalMinIO && c.RequestTimeoutMs > 0 {
+		tr := minioOpts.Transport
+		if tr == nil {
+			var err error
+			tr, err = minio.DefaultTransport(c.UseSSL)
+			if err != nil {
+				return nil, err
+			}
+		}
+		minioOpts.Transport = timeoutRoundTripper{
+			base:    tr,
+			timeout: time.Duration(c.RequestTimeoutMs) * time.Millisecond,
+		}
 	}
 
 	minIOClient, err := newMinioFn(c.Address, minioOpts)

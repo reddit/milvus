@@ -115,9 +115,15 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 }
 
 func (suite *LocalWorkerTestSuite) AfterTest(suiteName, testName string) {
-	suite.node.Stop()
-	suite.etcdClient.Close()
-	suite.cancel()
+	if suite.node != nil {
+		suite.node.Stop()
+	}
+	if suite.etcdClient != nil {
+		suite.etcdClient.Close()
+	}
+	if suite.cancel != nil {
+		suite.cancel()
+	}
 }
 
 func (suite *LocalWorkerTestSuite) TestLoadSegment() {

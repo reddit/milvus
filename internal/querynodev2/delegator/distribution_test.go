@@ -23,6 +23,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -1468,14 +1469,12 @@ func TestPinReadableSegments(t *testing.T) {
 	t.Run("requireFullResult_true_serviceable_false", func(t *testing.T) {
 		dist := setupDistribution()
 
-		mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
-		defer mockServiceable.UnPatch()
-		mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.8).Build()
-		defer mockGetLoadedRatio.UnPatch()
+		dist.queryView.loadedRatio.Store(0.8)
+		dist.queryView.syncedByCoord = false
 
 		sealed, growing, _, _, err := dist.PinReadableSegments(1.0, 1)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Nil(t, sealed)
 		assert.Nil(t, growing)
 		assert.Contains(t, err.Error(), "channel distribution is not serviceable")
@@ -1484,10 +1483,8 @@ func TestPinReadableSegments(t *testing.T) {
 	t.Run("requireFullResult_true_serviceable_true", func(t *testing.T) {
 		dist := setupDistribution()
 
-		mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(true).Build()
-		defer mockServiceable.UnPatch()
-		mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.8).Build()
-		defer mockGetLoadedRatio.UnPatch()
+		dist.queryView.loadedRatio.Store(1.0)
+		dist.queryView.syncedByCoord = true
 
 		sealed, growing, _, _, err := dist.PinReadableSegments(1.0, 1)
 
@@ -1499,14 +1496,12 @@ func TestPinReadableSegments(t *testing.T) {
 	t.Run("requireFullResult_false_loadRatioSatisfy_false", func(t *testing.T) {
 		dist := setupDistribution()
 
-		mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
-		defer mockServiceable.UnPatch()
-		mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.5).Build()
-		defer mockGetLoadedRatio.UnPatch()
+		dist.queryView.loadedRatio.Store(0.5)
+		dist.queryView.syncedByCoord = false
 
 		sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Nil(t, sealed)
 		assert.Nil(t, growing)
 		assert.Contains(t, err.Error(), "channel distribution is not serviceable")
@@ -1515,10 +1510,8 @@ func TestPinReadableSegments(t *testing.T) {
 	t.Run("requireFullResult_false_loadRatioSatisfy_true", func(t *testing.T) {
 		dist := setupDistribution()
 
-		mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
-		defer mockServiceable.UnPatch()
-		mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.9).Build()
-		defer mockGetLoadedRatio.UnPatch()
+		dist.queryView.loadedRatio.Store(0.9)
+		dist.queryView.syncedByCoord = false
 
 		sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)
 
@@ -1545,16 +1538,14 @@ func TestPinReadableSegments_ServiceableLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
-	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0
-	// This tests the case where load ratio is satisfied but serviceable is false
-	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
-	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(1.0).Build()
-	defer mockServiceable.UnPatch()
-	defer mockGetLoadedRatio.UnPatch()
+	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0.
+	// Keep the data loaded but mark the query view unsynced.
+	dist.queryView.loadedRatio.Store(1.0)
+	dist.queryView.syncedByCoord = false
 
 	sealed, growing, _, _, err := dist.PinReadableSegments(1.0, 1)
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, sealed)
 	assert.Nil(t, growing)
 	assert.Contains(t, err.Error(), "channel distribution is not serviceable")
@@ -1577,14 +1568,14 @@ func TestPinReadableSegments_LoadRatioLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
-	// Test case: requireFullResult=false, loadRatioSatisfy=false
-	// This tests the case where partial result is requested but load ratio is insufficient
-	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.3).Build()
-	defer mockGetLoadedRatio.UnPatch()
+	// Test case: requireFullResult=false, loadRatioSatisfy=false.
+	// Set the ratio directly so the race-enabled test target does not depend on
+	// method patching.
+	dist.queryView.loadedRatio.Store(0.3)
 
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.5, 1)
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, sealed)
 	assert.Nil(t, growing)
 	assert.Contains(t, err.Error(), "channel distribution is not serviceable")
@@ -1608,7 +1599,7 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 	}, []int64{1})
 
 	// Test case 1: requiredLoadRatio = 0.0 (edge case)
-	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
+	dist.queryView.loadedRatio.Store(0.0)
 
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.0, 1)
 
@@ -1617,8 +1608,7 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 	assert.NotNil(t, growing)
 
 	// Test case 2: requiredLoadRatio = 0.0, GetLoadedRatio = 0.0 (exact match)
-	mockGetLoadedRatio.UnPatch()
-	mockGetLoadedRatio = mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
+	dist.queryView.loadedRatio.Store(0.0)
 
 	sealed, growing, _, _, err = dist.PinReadableSegments(0.0, 1)
 
@@ -1627,9 +1617,7 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 	assert.NotNil(t, growing)
 
 	// Test case 3: requiredLoadRatio = 0.0, GetLoadedRatio = 0.1 (satisfied)
-	mockGetLoadedRatio.UnPatch()
-	mockGetLoadedRatio = mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.1).Build()
-	defer mockGetLoadedRatio.UnPatch()
+	dist.queryView.loadedRatio.Store(0.1)
 
 	sealed, growing, _, _, err = dist.PinReadableSegments(0.0, 1)
 
@@ -1643,13 +1631,6 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 // partial result (filtered by query view's segment list) instead of empty segment list.
 // This covers the fix in commit 15bc5d0928: prevent empty segment list when partial result is enabled.
 func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
-	// Mock: loadedRatio = 1.0 (all segments loaded)
-	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(1.0).Build()
-	defer mockGetLoadedRatio.UnPatch()
-	// Mock: Serviceable = false (syncedByCoord = false)
-	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
-	defer mockServiceable.UnPatch()
-
 	// Create distribution with query view
 	queryView := NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion)
 	dist := NewDistribution("test-channel", queryView)
@@ -1666,6 +1647,8 @@ func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
 		SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100},
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
+	dist.queryView.loadedRatio.Store(1.0)
+	dist.queryView.syncedByCoord = false
 
 	// Call PinReadableSegments with partial result enabled (requiredLoadRatio < 1.0)
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)

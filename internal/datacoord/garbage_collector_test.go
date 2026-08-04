@@ -358,6 +358,10 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.RemoteChunkManager, 
 }
 
 func cleanupOSS(chunkManager *storage.RemoteChunkManager, bucket, root string) {
+	if chunkManager == nil {
+		return
+	}
+
 	cli := chunkManager.UnderlyingObjectStorage().(*storage.MinioObjectStorage).Client
 	ch := cli.ListObjects(context.TODO(), bucket, minio.ListObjectsOptions{Prefix: root, Recursive: true})
 	cli.RemoveObjects(context.TODO(), bucket, ch, minio.RemoveObjectsOptions{})
