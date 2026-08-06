@@ -1,7 +1,7 @@
 name: Rerun Failure Checks
+# Disabled in this fork; CI runs via internal pipelines.
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 jobs:
   rerun-checks:
     if:  "github.event_name == 'issue_comment'&& startsWith(github.event.comment.body, 'rerun ut')"

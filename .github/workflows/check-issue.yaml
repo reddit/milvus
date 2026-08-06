@@ -1,9 +1,8 @@
 name: Add Comment for issue
 
+# Disabled in this fork; CI runs via internal pipelines.
 on:
-  issues:
-    types: [opened]
-
+  workflow_dispatch:
 jobs:
   check_issue_title:
     name: Check issue

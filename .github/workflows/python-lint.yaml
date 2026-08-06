@@ -1,19 +1,8 @@
 name: Python Lint (tests/)
 
+# Disabled in this fork; CI runs via internal pipelines.
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'tests/**/*.py'
-      - 'tests/ruff.toml'
-      - '.github/workflows/python-lint.yaml'
-  pull_request:
-    paths:
-      - 'tests/**/*.py'
-      - 'tests/ruff.toml'
-      - '.github/workflows/python-lint.yaml'
-
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
