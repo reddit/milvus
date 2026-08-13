@@ -26,10 +26,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/row"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/reddit/milvus/client/v2/column"
+	"github.com/reddit/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/row"
 )
 
 type InsertOption interface {

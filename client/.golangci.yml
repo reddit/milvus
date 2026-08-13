@@ -260,13 +260,14 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/milvus-io)
+        - prefix(github.com/milvus-io,github.com/reddit)
       custom-order: true
     gofumpt:
-      module-path: github.com/milvus-io
+      module-path: github.com/reddit/milvus/client/v2
     goimports:
       local-prefixes:
         - github.com/milvus-io
+        - github.com/reddit
   exclusions:
     generated: lax
     paths:

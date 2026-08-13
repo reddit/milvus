@@ -25,8 +25,8 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 type VectorSuite struct {

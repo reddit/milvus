@@ -1,9 +1,9 @@
 package helper
 
 import (
-	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 type LoadParams struct {

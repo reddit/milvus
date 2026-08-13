@@ -22,7 +22,7 @@ import (
 	"log"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/reddit/milvus/client/v2/milvusclient"
 )
 
 const (

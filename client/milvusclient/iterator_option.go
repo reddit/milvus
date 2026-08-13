@@ -20,8 +20,8 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/reddit/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/index"
 )
 
 type SearchIteratorOption interface {

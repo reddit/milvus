@@ -14,11 +14,11 @@ import (
 	// "github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/reddit/milvus/client/v2/column"
+	"github.com/reddit/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/index"
+	client "github.com/reddit/milvus/client/v2/milvusclient"
 )
 
 func trace() string {

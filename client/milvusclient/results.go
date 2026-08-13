@@ -23,9 +23,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/row"
+	"github.com/reddit/milvus/client/v2/column"
+	"github.com/reddit/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/row"
 )
 
 // ResultSet is struct for search result set.
