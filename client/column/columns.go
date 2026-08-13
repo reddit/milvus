@@ -23,7 +23,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 // Column interface field type for column-based data frame

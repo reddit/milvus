@@ -9,10 +9,10 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
+	client "github.com/reddit/milvus/client/v2/milvusclient"
 )
 
 var (

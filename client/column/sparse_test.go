@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 func TestColumnSparseEmbedding(t *testing.T) {

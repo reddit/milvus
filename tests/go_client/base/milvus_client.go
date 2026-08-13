@@ -9,10 +9,10 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/reddit/milvus/client/v2/entity"
+	client "github.com/reddit/milvus/client/v2/milvusclient"
 )
 
 func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {

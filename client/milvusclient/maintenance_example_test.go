@@ -21,7 +21,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/reddit/milvus/client/v2/milvusclient"
 )
 
 func ExampleClient_GetLoadState() {

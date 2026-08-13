@@ -1,8 +1,8 @@
 package helper
 
 import (
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/reddit/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/index"
 )
 
 func GetDefaultVectorIndex(fieldType entity.FieldType) index.Index {

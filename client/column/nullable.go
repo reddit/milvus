@@ -21,7 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 var (

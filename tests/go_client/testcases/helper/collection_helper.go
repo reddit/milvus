@@ -1,7 +1,7 @@
 package helper
 
 import (
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 type CreateCollectionParams struct {

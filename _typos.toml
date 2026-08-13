@@ -1,0 +1,40 @@
+# Upstream Milvus spellings that must not be auto-corrected.
+#
+# The typos pre-commit hook only sees the files staged in a given commit, so
+# renaming an identifier here desynchronizes it from every file the commit does
+# not touch. A commit touching client/ rewrote the exported IvfRabitQ constant
+# but not its use in index/ivf.go, which left the module uncompilable.
+#
+# Some entries are load-bearing beyond naming: speficy and unsupport appear in
+# server error strings that tests assert on, WithPartitons is a deliberately
+# misspelled deprecated alias, and decorder is a real golangci-lint linter.
+
+[default.extend-words]
+# Exported API identifiers.
+rabit = "rabit"
+parition = "parition"
+paritition = "paritition"
+partitons = "partitons"
+mis = "mis"
+
+# Internal identifiers and locals.
+compatiblity = "compatiblity"
+froms = "froms"
+anonymus = "anonymus"
+singl = "singl"
+fo = "fo"
+decorder = "decorder"
+
+# Comments and error strings.
+alway = "alway"
+comparision = "comparision"
+exisiting = "exisiting"
+peform = "peform"
+serveral = "serveral"
+speficy = "speficy"
+unsupport = "unsupport"
+implemention = "implemention"
+overwrited = "overwrited"
+setted = "setted"
+unmarshaling = "unmarshaling"
+sumbit = "sumbit"

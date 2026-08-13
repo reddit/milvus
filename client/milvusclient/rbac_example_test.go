@@ -20,8 +20,8 @@ package milvusclient_test
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/reddit/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/milvusclient"
 )
 
 func ExampleClient_GrantPrivilege() {

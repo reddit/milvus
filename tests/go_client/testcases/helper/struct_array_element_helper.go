@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 // Mirrors constants from tests/python_client/milvus_client/

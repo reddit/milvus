@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
+	client "github.com/reddit/milvus/client/v2/milvusclient"
 )
 
 // test connect and close, connect again

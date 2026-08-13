@@ -1,4 +1,4 @@
-module github.com/milvus-io/milvus/client/v2
+module github.com/reddit/milvus/client/v2
 
 go 1.25.8
 

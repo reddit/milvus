@@ -73,7 +73,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus/client/v2 v2.0.0-00010101000000-000000000000
+	github.com/reddit/milvus/client/v2 v2.0.0-00010101000000-000000000000
 	github.com/milvus-io/milvus/pkg/v2 v2.6.7-0.20251201120310-af64f2acba38
 	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/shirou/gopsutil/v4 v4.25.10
@@ -95,7 +95,7 @@ require (
 	github.com/smartystreets/goconvey v1.7.2 // indirect
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ./client
+replace github.com/reddit/milvus/client/v2 => ./client
 
 require (
 	cel.dev/expr v0.25.1 // indirect

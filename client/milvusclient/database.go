@@ -22,8 +22,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 func (c *Client) UseDatabase(ctx context.Context, option UseDatabaseOption) error {

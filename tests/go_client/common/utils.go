@@ -11,8 +11,8 @@ import (
 	"github.com/x448/float16"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/reddit/milvus/client/v2/entity"
 )
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
