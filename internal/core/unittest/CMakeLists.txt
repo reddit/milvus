@@ -39,6 +39,7 @@ file(GLOB_RECURSE SOURCE_TEST_FILES
 set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
+        test_bitmap_vector.cpp
         test_loading.cpp
         test_exec.cpp
         test_expr_materialized_view.cpp

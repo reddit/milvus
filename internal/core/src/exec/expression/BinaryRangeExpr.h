@@ -44,7 +44,7 @@ struct BinaryRangeElementFunc {
                const T* src,
                size_t n,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const Bitmap& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (filter_type == FilterType::random ||
@@ -128,7 +128,7 @@ struct BinaryRangeElementFuncForJson {
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               const Bitmap& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -167,7 +167,7 @@ struct BinaryRangeElementFuncForArray {
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               const Bitmap& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -227,13 +227,13 @@ struct BinaryRangeIndexFunc {
                                int64_t,
                                IndexInnerType>
         HighPrecisionType;
-    TargetBitmap
+    Bitmap
     operator()(Index* index,
                IndexInnerType val1,
                IndexInnerType val2,
                bool lower_inclusive,
                bool upper_inclusive) {
-        return index->Range(val1, lower_inclusive, val2, upper_inclusive);
+        return index->RangeBitmap(val1, lower_inclusive, val2, upper_inclusive);
     }
 };
 

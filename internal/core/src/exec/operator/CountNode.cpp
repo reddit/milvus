@@ -16,6 +16,7 @@
 
 #include "CountNode.h"
 #include "common/Tracer.h"
+#include "exec/expression/Utils.h"
 #include "fmt/format.h"
 namespace milvus {
 namespace exec {
@@ -60,11 +61,11 @@ PhyCountNode::GetOutput() {
         return nullptr;
     }
     tracer::AutoSpan span("PhyCountNode::Execute", tracer::GetRootSpan(), true);
-    auto col_input = GetColumnVector(input_);
-    TargetBitmapView view(col_input->GetRawData(), col_input->size());
-    auto cnt = view.size() - view.count();
+    auto bitmap = GetBitmapVector(input_);
+    const auto size = bitmap->size();
+    auto cnt = size - bitmap->result().count();
     query_context_->set_retrieve_result(
-        std::move(*(wrap_num_entities(cnt, view.size()))));
+        std::move(*(wrap_num_entities(cnt, size))));
     is_finished_ = true;
 
     tracer::AddEvent(fmt::format("count_result: {}", cnt));

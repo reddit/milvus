@@ -17,6 +17,7 @@
 #include "FilterBitsNode.h"
 #include "common/Tracer.h"
 #include "expr/ITypeExpr.h"
+#include "exec/expression/Utils.h"
 #include "fmt/format.h"
 
 #include "monitor/Monitor.h"
@@ -74,11 +75,9 @@ PhyFilterBitsNode::GetOutput() {
     // Directly produce all-zero bitmap (no rows excluded) + all-one valid bitmap.
     if (is_always_true_) {
         num_processed_rows_ = need_process_rows_;
-        TargetBitmap bitset(need_process_rows_, false);
-        TargetBitmap valid_bitset(need_process_rows_, true);
         std::vector<VectorPtr> col_res;
-        col_res.push_back(std::make_shared<ColumnVector>(
-            std::move(bitset), std::move(valid_bitset)));
+        col_res.push_back(
+            std::make_shared<BitmapVector>(need_process_rows_, true));
         return std::make_shared<RowVector>(col_res);
     }
 
@@ -91,8 +90,8 @@ PhyFilterBitsNode::GetOutput() {
 
     EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
 
-    TargetBitmap bitset;
-    TargetBitmap valid_bitset;
+    Bitmap bitset(need_process_rows_, false);
+    Bitmap valid_bitset(need_process_rows_, false);
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -100,24 +99,17 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result size should be size one and not "
                    "be nullptr");
 
-        if (auto col_vec =
-                std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
-            if (col_vec->IsBitmap()) {
-                auto col_vec_size = col_vec->size();
-                TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                bitset.append(view);
-                TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                            col_vec_size);
-                valid_bitset.append(valid_view);
-                num_processed_rows_ += col_vec_size;
-            } else {
-                ThrowInfo(ExprInvalid,
-                          "PhyFilterBitsNode result should be bitmap");
-            }
-        } else {
-            ThrowInfo(ExprInvalid,
-                      "PhyFilterBitsNode result should be ColumnVector");
-        }
+        auto bitmap = GetBitmapVector(results_[0]);
+        const auto output_offset = num_processed_rows_;
+        bitmap->result().iterate([&](size_t offset) {
+            bitset.set(output_offset + offset);
+            return true;
+        });
+        bitmap->validity().iterate([&](size_t offset) {
+            valid_bitset.set(output_offset + offset);
+            return true;
+        });
+        num_processed_rows_ += bitmap->size();
     }
     bitset.flip();
     AssertInfo(bitset.size() == need_process_rows_,
@@ -128,8 +120,8 @@ PhyFilterBitsNode::GetOutput() {
 
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;
-    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
-                                                     std::move(valid_bitset)));
+    col_res.push_back(std::make_shared<BitmapVector>(
+        std::move(bitset), std::move(valid_bitset)));
     std::chrono::high_resolution_clock::time_point scalar_end =
         std::chrono::high_resolution_clock::now();
     double scalar_cost =
@@ -138,7 +130,7 @@ PhyFilterBitsNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
 
-    return std::make_shared<RowVector>(col_res);
+    return std::make_shared<RowVector>(std::move(col_res));
 }
 
 }  // namespace exec

@@ -103,34 +103,35 @@ PhyVectorSearchNode::GetOutput() {
             query_context_->set_active_element_count(data_cnt);
 
             std::vector<VectorPtr> col_res;
-            col_res.push_back(std::make_shared<ColumnVector>(
+            col_res.push_back(std::make_shared<BitmapVector>(
                 std::move(element_bitset), std::move(valid_element_bitset)));
             input_ = std::make_shared<RowVector>(col_res);
         }
     }
 
-    auto col_input = GetColumnVector(input_);
+    auto bitmap_input = GetBitmapVector(input_);
+    input_ = std::make_shared<RowVector>(
+        std::vector<VectorPtr>{bitmap_input});
 
     // Prepare BitsetView for search.
     // Fast path: all_rows_visible + non-element-level -> empty BitsetView
     //            (IDSelectorAll in Knowhere, skips per-vector bit test).
     // Normal path: build BitsetView from the bitmap produced upstream.
     milvus::BitsetView search_view;
+    std::unique_ptr<FrozenRoaringBitsetView> frozen_view;
 
     if (query_context_->get_all_rows_visible() && !ph.element_level_) {
         // search_view stays default-constructed (empty)
     } else {
-        TargetBitmapView view(col_input->GetRawData(), col_input->size());
-
-        if (view.all()) {
+        if (bitmap_input->result().all()) {
             query_context_->set_search_result(
                 std::move(empty_search_result(num_queries, ph.element_level_)));
             return input_;
         }
 
-        // TODO: uniform knowhere BitsetView and milvus BitsetView
-        search_view = milvus::BitsetView((uint8_t*)col_input->GetRawData(),
-                                         col_input->size());
+        frozen_view =
+            std::make_unique<FrozenRoaringBitsetView>(*bitmap_input);
+        search_view = frozen_view->view();
         data_cnt = search_view.size();
     }
 

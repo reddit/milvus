@@ -39,7 +39,9 @@ PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                    : std::nullopt);
             return;
         }
-        common::ThreeValuedLogicOp::Not(GetColumnVector(result));
+        auto bitmap = GetBitmapVector(result);
+        bitmap->Flip();
+        result = std::move(bitmap);
     }
 }
 
