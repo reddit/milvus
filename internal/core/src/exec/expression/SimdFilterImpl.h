@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstring>
 #include <vector>
+#include "../../../cmake/macos_xsimd_compat.hxx"
 #include <xsimd/xsimd.hpp>
 #include "common/SimdUtil.h"
 

@@ -126,25 +126,21 @@ class PhyConjunctFilterExpr : public Expr {
     //   - TRUE rows: already determined, no need to evaluate
     //   => bitmap = ~data | ~valid (FALSE or NULL)
     void
-    SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
-        const size_t size = vec->size();
-        TargetBitmapView data(vec->GetRawData(), size);
-        TargetBitmapView valid(vec->GetValidRawData(), size);
-
+    SetNextExprBitmapInput(const BitmapVectorPtr& vec, EvalCtx& context) {
         if (is_and_) {
             // bitmap = data | ~valid
             // Using De Morgan's law: data | ~valid = ~(~data & valid) = ~(valid & ~data)
             // Use inplace_sub which computes: this = this & ~other
-            TargetBitmap next_input_bitmap(valid);      // copy valid
-            next_input_bitmap.inplace_sub(data, size);  // valid & ~data
-            next_input_bitmap.flip();  // ~(valid & ~data) = data | ~valid
+            auto next_input_bitmap = vec->validity().clone();
+            next_input_bitmap.and_not_with(vec->result());
+            next_input_bitmap.flip();
             context.set_bitmap_input(std::move(next_input_bitmap));
         } else {
             // bitmap = ~data | ~valid
             // Using De Morgan's law: ~data | ~valid = ~(data & valid)
-            TargetBitmap next_input_bitmap(data);        // copy data
-            next_input_bitmap.inplace_and(valid, size);  // data & valid
-            next_input_bitmap.flip();  // ~(data & valid) = ~data | ~valid
+            auto next_input_bitmap = vec->result().clone();
+            next_input_bitmap.and_with(vec->validity());
+            next_input_bitmap.flip();
             context.set_bitmap_input(std::move(next_input_bitmap));
         }
     }
@@ -166,15 +162,15 @@ class PhyConjunctFilterExpr : public Expr {
 
  private:
     int64_t
-    UpdateResult(ColumnVectorPtr& input_result,
+    UpdateResult(BitmapVectorPtr& input_result,
                  EvalCtx& ctx,
-                 ColumnVectorPtr& result);
+                 BitmapVectorPtr& result);
 
     static DataType
     ResolveType(const std::vector<DataType>& inputs);
 
     bool
-    CanSkipFollowingExprs(ColumnVectorPtr& vec);
+    CanSkipFollowingExprs(BitmapVectorPtr& vec);
 
     void
     SkipFollowingExprs(int start);

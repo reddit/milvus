@@ -190,7 +190,7 @@ TextMatchIndex::Load(const Config& config) {
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+        prefix.c_str(), load_in_mmap, milvus::index::SetHitsSealed);
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -315,7 +315,7 @@ TextMatchIndex::Reload() {
 
 void
 TextMatchIndex::CreateReader(SetBitsetFn set_bitset) {
-    wrapper_->create_reader(set_bitset);
+    wrapper_->create_reader(ToTantivyHitSinkCallback(set_bitset));
 }
 
 void
@@ -334,10 +334,11 @@ TextMatchIndex::MatchQuery(const std::string& query,
     }
 
     TargetBitmap bitset{static_cast<size_t>(Count())};
+    auto sink = TantivyHitSink::Dense(bitset);
     // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
-    wrapper_->match_query(query, min_should_match, &bitset);
+    wrapper_->match_query(query, min_should_match, &sink);
     return bitset;
 }
 
@@ -351,10 +352,11 @@ TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     }
 
     TargetBitmap bitset{static_cast<size_t>(Count())};
+    auto sink = TantivyHitSink::Dense(bitset);
     // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
-    wrapper_->phrase_match_query(query, slop, &bitset);
+    wrapper_->phrase_match_query(query, slop, &sink);
     return bitset;
 }
 

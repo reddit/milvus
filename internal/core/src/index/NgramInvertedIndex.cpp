@@ -290,7 +290,7 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+        path_.c_str(), load_in_mmap, milvus::index::SetHitsSealed);
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -442,7 +442,8 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
                                               Predicate&& predicate,
                                               bool need_post_filter) {
     TargetBitmap bitset{static_cast<size_t>(Count())};
-    wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
+    auto sink = TantivyHitSink::Dense(bitset);
+    wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &sink);
 
     auto ngram_hit_count = bitset.count();
     auto final_result_count = ngram_hit_count;
@@ -519,7 +520,8 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
             return std::nullopt;
         }
         TargetBitmap tmp_bitset(static_cast<size_t>(Count()), false);
-        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &tmp_bitset);
+        auto sink = TantivyHitSink::Dense(tmp_bitset);
+        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &sink);
         bitset &= tmp_bitset;
     }
 

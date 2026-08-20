@@ -22,6 +22,9 @@ BitsetHasNoFilteredRows(const BitsetView& bitset) {
         }
         return true;
     }
+    if (bitset.is_roaring()) {
+        return roaring_bitmap_is_empty(bitset.roaring());
+    }
 
     const auto* data = bitset.data();
     auto full_bytes = bitset.size() / 8;
@@ -50,6 +53,10 @@ BitsetFiltersAllRows(const BitsetView& bitset) {
             }
         }
         return true;
+    }
+    if (bitset.is_roaring()) {
+        return roaring_bitmap_get_cardinality(bitset.roaring()) ==
+               bitset.size();
     }
 
     const auto* data = bitset.data();

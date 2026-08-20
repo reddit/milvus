@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "exec/expression/Element.h"
+#include "../../../cmake/macos_xsimd_compat.hxx"
 #include <xsimd/xsimd.hpp>
 #include "common/SimdUtil.h"
 

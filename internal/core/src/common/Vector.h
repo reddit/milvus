@@ -82,7 +82,8 @@ class SimpleVector : public BaseVector {
  * @brief Single vector for scalar types
  * @todo using memory pool && buffer replace FieldData
  */
-class ColumnVector final : public SimpleVector {
+class __attribute__((visibility("default"))) ColumnVector final
+    : public SimpleVector {
  public:
     ColumnVector(DataType data_type,
                  size_t length,

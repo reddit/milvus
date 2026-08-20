@@ -31,27 +31,18 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     inputs_[0]->Eval(context, left);
     VectorPtr right;
     inputs_[1]->Eval(context, right);
-    auto lflat = GetColumnVector(left);
-    auto rflat = GetColumnVector(right);
-    auto size = left->size();
-    TargetBitmapView lview(lflat->GetRawData(), size);
-    TargetBitmapView rview(rflat->GetRawData(), size);
+    auto lflat = GetBitmapVector(left);
+    auto rflat = GetBitmapVector(right);
     if (expr_->op_type_ == expr::LogicalBinaryExpr::OpType::And) {
-        LogicalElementFunc<LogicalOpType::And> func;
-        func(lview, rview, size);
+        lflat->And(*rflat);
     } else if (expr_->op_type_ == expr::LogicalBinaryExpr::OpType::Or) {
-        LogicalElementFunc<LogicalOpType::Or> func;
-        func(lview, rview, size);
+        lflat->Or(*rflat);
     } else {
         ThrowInfo(OpTypeInvalid,
                   "unsupported logical operator: {}",
                   expr_->GetOpTypeString());
     }
-    TargetBitmapView lvalid_view(lflat->GetValidRawData(), size);
-    TargetBitmapView rvalid_view(rflat->GetValidRawData(), size);
-    LogicalElementFunc<LogicalOpType::Or> func;
-    func(lvalid_view, rvalid_view, size);
-    result = std::move(left);
+    result = std::move(lflat);
 }
 
 }  //namespace exec

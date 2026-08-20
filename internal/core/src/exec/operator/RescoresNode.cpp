@@ -19,6 +19,7 @@
 #include "common/EasyAssert.h"
 #include "fmt/format.h"
 #include <cstddef>
+#include "exec/expression/Utils.h"
 #include "exec/operator/Utils.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
@@ -134,14 +135,9 @@ PhyRescoresNode::GetOutput() {
                        "offsets size: {}, filter: {}",
                        offsets.size(),
                        filter->ToString());
-            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-            AssertInfo(
-                col_vec != nullptr,
-                "PhyRescoresNode: failed to cast result to ColumnVector, "
-                "filter: {}",
-                filter->ToString());
-            auto col_vec_size = col_vec->size();
-            TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+            auto bitmap = GetBitmapVector(results[0]);
+            auto dense = bitmap->result().to_dense();
+            TargetBitmapView bitsetview(dense);
             scorer->batch_score(op_context,
                                 segment,
                                 function_mode,
@@ -157,16 +153,8 @@ PhyRescoresNode::GetOutput() {
                        "PhyRescoresNode: filter expr returned null result, "
                        "filter: {}",
                        filter->ToString());
-            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-            AssertInfo(
-                col_vec != nullptr,
-                "PhyRescoresNode: failed to cast result to ColumnVector, "
-                "filter: {}",
-                filter->ToString());
-            TargetBitmap bitset;
-            auto col_vec_size = col_vec->size();
-            TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-            bitset.append(view);
+            auto bitmap = GetBitmapVector(results[0]);
+            auto bitset = bitmap->result().to_dense();
             scorer->batch_score(op_context,
                                 segment,
                                 function_mode,

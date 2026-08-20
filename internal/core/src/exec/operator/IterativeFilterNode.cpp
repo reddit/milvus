@@ -15,7 +15,9 @@
 // limitations under the License.
 
 #include "IterativeFilterNode.h"
+#include "common/BitmapVector.h"
 #include "common/Tracer.h"
+#include "exec/expression/Utils.h"
 #include "fmt/format.h"
 
 #include "exec/Driver.h"
@@ -136,12 +138,11 @@ PhyIterativeFilterNode::GetOutput() {
     int64_t unity_topk = search_result.unity_topK_;
     knowhere::MetricType metric_type = query_context_->get_metric_type();
     bool large_is_better = PositivelyRelated(metric_type);
-    TargetBitmap bitset;
+    Bitmap bitset;
     // get bitset of whole segment first
     if (!is_native_supported_) {
         EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
 
-        TargetBitmap valid_bitset;
         while (num_processed_rows_ < need_process_rows_) {
             exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -150,28 +151,11 @@ PhyIterativeFilterNode::GetOutput() {
                 "PhyIterativeFilterNode result size should be size one and not "
                 "be nullptr");
 
-            if (auto col_vec =
-                    std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
-                if (col_vec->IsBitmap()) {
-                    auto col_vec_size = col_vec->size();
-                    TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                    bitset.append(view);
-                    TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                                col_vec_size);
-                    valid_bitset.append(valid_view);
-                    num_processed_rows_ += col_vec_size;
-                } else {
-                    ThrowInfo(ExprInvalid,
-                              "PhyIterativeFilterNode result should be bitmap");
-                }
-            } else {
-                ThrowInfo(
-                    ExprInvalid,
-                    "PhyIterativeFilterNode result should be ColumnVector");
-            }
+            auto bitmap = GetBitmapVector(results_[0]);
+            bitset.append(bitmap->result());
+            num_processed_rows_ += bitmap->size();
         }
         Assert(bitset.size() == need_process_rows_);
-        Assert(valid_bitset.size() == need_process_rows_);
     }
     if (search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
@@ -223,15 +207,11 @@ PhyIterativeFilterNode::GetOutput() {
                         "one and not "
                         "be nullptr");
 
-                    auto col_vec =
-                        std::dynamic_pointer_cast<ColumnVector>(results[0]);
-                    auto col_vec_size = col_vec->size();
-                    TargetBitmapView bitsetview(col_vec->GetRawData(),
-                                                col_vec_size);
-                    Assert(bitsetview.size() <= batch_size);
-                    Assert(bitsetview.size() == offsets.size());
+                    auto bitmap = GetBitmapVector(results[0]);
+                    Assert(bitmap->size() <= batch_size);
+                    Assert(bitmap->size() == offsets.size());
                     for (auto i = 0; i < offsets.size(); ++i) {
-                        if (bitsetview[i] > 0) {
+                        if (bitmap->result().test(i)) {
                             insert_helper(search_result,
                                           topk,
                                           large_is_better,
@@ -247,7 +227,7 @@ PhyIterativeFilterNode::GetOutput() {
                     }
                 } else {
                     for (auto i = 0; i < offsets.size(); ++i) {
-                        if (bitset[offsets[i]] > 0) {
+                        if (bitset.test(offsets[i])) {
                             insert_helper(search_result,
                                           topk,
                                           large_is_better,

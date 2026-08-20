@@ -848,6 +848,13 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
 }
 
 void
+ChunkedSegmentSealedImpl::mask_with_delete(Bitmap& bitset,
+                                           int64_t ins_barrier,
+                                           Timestamp timestamp) const {
+    deleted_record_.Query(bitset, ins_barrier, timestamp);
+}
+
+void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
                                         const size_t* query_offsets,
@@ -2514,6 +2521,53 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
     auto mask = TimestampIndex::GenerateBitset(
         timestamp, range, timestamps_data, timestamps_data_size);
     bitset_chunk |= mask;
+}
+
+void
+ChunkedSegmentSealedImpl::mask_with_timestamps(Bitmap& bitset_chunk,
+                                               Timestamp timestamp,
+                                               Timestamp collection_ttl) const {
+    AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
+               "num chunk not equal to 1 for sealed segment");
+    const auto* timestamps = static_cast<const Timestamp*>(
+        insert_record_.timestamps_.get_chunk_data(0));
+    const auto size = insert_record_.timestamps_.get_chunk_size(0);
+    AssertInfo(size == get_row_count() && bitset_chunk.size() == size,
+               "Timestamp/bitmap size does not match row count: {}, {}, {}",
+               size,
+               bitset_chunk.size(),
+               get_row_count());
+
+    if (collection_ttl > 0) {
+        const auto [begin, end] =
+            insert_record_.timestamp_index_.get_active_range(collection_ttl);
+        if (begin == end && begin == size) {
+            bitset_chunk.set_all();
+            return;
+        }
+        bitset_chunk.set_range(0, begin, true);
+        for (int64_t i = begin; i < end; ++i) {
+            if (timestamps[i] <= collection_ttl) {
+                bitset_chunk.set(i);
+            }
+        }
+    }
+
+    const auto [begin, end] =
+        insert_record_.timestamp_index_.get_active_range(timestamp);
+    if (begin == end && begin == size) {
+        return;
+    }
+    if (begin == end && begin == 0) {
+        bitset_chunk.set_all();
+        return;
+    }
+    bitset_chunk.set_range(end, size, true);
+    for (int64_t i = begin; i < end; ++i) {
+        if (timestamps[i] > timestamp) {
+            bitset_chunk.set(i);
+        }
+    }
 }
 
 bool

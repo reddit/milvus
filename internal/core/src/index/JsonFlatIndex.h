@@ -39,10 +39,22 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::In",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
+        auto sink = TantivyHitSink::Dense(bitset);
         for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
+            this->wrapper_->json_term_query(json_path_, values[i], &sink);
         }
         return bitset;
+    }
+
+    Bitmap
+    InBitmap(size_t n, const T* values) override {
+        roaring::Roaring bitset;
+        const auto count = this->Count();
+        auto sink = TantivyHitSink::Roaring(count, bitset);
+        for (size_t i = 0; i < n; ++i) {
+            this->wrapper_->json_term_query(json_path_, values[i], &sink);
+        }
+        return Bitmap(count, std::move(bitset));
     }
 
     TargetBitmap
@@ -50,7 +62,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Exists",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        this->wrapper_->json_exist_query(json_path_, &bitset);
+        auto sink = TantivyHitSink::Dense(bitset);
+        this->wrapper_->json_exist_query(json_path_, &sink);
         return bitset;
     }
 
@@ -62,8 +75,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyFilter",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
+        auto sink = TantivyHitSink::Dense(bitset);
         for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
+            this->wrapper_->json_term_query(json_path_, values[i], &sink);
             apply_hits_with_filter(bitset, filter);
         }
         return bitset;
@@ -77,8 +91,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyCallback",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
+        auto sink = TantivyHitSink::Dense(bitset);
         for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
+            this->wrapper_->json_term_query(json_path_, values[i], &sink);
             apply_hits_with_callback(bitset, callback);
         }
     }
@@ -88,8 +103,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::NotIn",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
+        auto sink = TantivyHitSink::Dense(bitset);
         for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
+            this->wrapper_->json_term_query(json_path_, values[i], &sink);
         }
 
         bitset.flip();
@@ -107,28 +123,58 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Range",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
+        auto sink = TantivyHitSink::Dense(bitset);
         switch (op) {
             case OpType::LessThan: {
                 this->wrapper_->json_range_query(
-                    json_path_, T(), value, true, false, false, false, &bitset);
+                    json_path_, T(), value, true, false, false, false, &sink);
             } break;
             case OpType::LessEqual: {
                 this->wrapper_->json_range_query(
-                    json_path_, T(), value, true, false, true, false, &bitset);
+                    json_path_, T(), value, true, false, true, false, &sink);
             } break;
             case OpType::GreaterThan: {
                 this->wrapper_->json_range_query(
-                    json_path_, value, T(), false, true, false, false, &bitset);
+                    json_path_, value, T(), false, true, false, false, &sink);
             } break;
             case OpType::GreaterEqual: {
                 this->wrapper_->json_range_query(
-                    json_path_, value, T(), false, true, true, false, &bitset);
+                    json_path_, value, T(), false, true, true, false, &sink);
             } break;
             default:
                 ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType: {}", op));
         }
         return bitset;
+    }
+
+    Bitmap
+    RangeBitmap(const T& value, OpType op) override {
+        roaring::Roaring bitset;
+        const auto count = this->Count();
+        auto sink = TantivyHitSink::Roaring(count, bitset);
+        switch (op) {
+            case OpType::LessThan:
+                this->wrapper_->json_range_query(
+                    json_path_, T(), value, true, false, false, false, &sink);
+                break;
+            case OpType::LessEqual:
+                this->wrapper_->json_range_query(
+                    json_path_, T(), value, true, false, true, false, &sink);
+                break;
+            case OpType::GreaterThan:
+                this->wrapper_->json_range_query(
+                    json_path_, value, T(), false, true, false, false, &sink);
+                break;
+            case OpType::GreaterEqual:
+                this->wrapper_->json_range_query(
+                    json_path_, value, T(), false, true, true, false, &sink);
+                break;
+            default:
+                ThrowInfo(OpTypeInvalid,
+                          fmt::format("Invalid OperatorType: {}", op));
+        }
+        return Bitmap(count, std::move(bitset));
     }
 
     const TargetBitmap
@@ -144,6 +190,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RangeWithBounds",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
+        auto sink = TantivyHitSink::Dense(bitset);
         this->wrapper_->json_range_query(json_path_,
                                          lower_bound_value,
                                          upper_bound_value,
@@ -151,8 +198,27 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                                          false,
                                          lb_inclusive,
                                          ub_inclusive,
-                                         &bitset);
+                                         &sink);
         return bitset;
+    }
+
+    Bitmap
+    RangeBitmap(const T& lower_bound_value,
+                bool lb_inclusive,
+                const T& upper_bound_value,
+                bool ub_inclusive) override {
+        roaring::Roaring bitset;
+        const auto count = this->Count();
+        auto sink = TantivyHitSink::Roaring(count, bitset);
+        this->wrapper_->json_range_query(json_path_,
+                                         lower_bound_value,
+                                         upper_bound_value,
+                                         false,
+                                         false,
+                                         lb_inclusive,
+                                         ub_inclusive,
+                                         &sink);
+        return Bitmap(count, std::move(bitset));
     }
 
     const TargetBitmap
@@ -160,8 +226,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::PrefixMatch",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
+        auto sink = TantivyHitSink::Dense(bitset);
         this->wrapper_->json_prefix_query(
-            json_path_, std::string(prefix), &bitset);
+            json_path_, std::string(prefix), &sink);
         return bitset;
     }
 
@@ -170,7 +237,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RegexQuery",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        this->wrapper_->json_regex_query(json_path_, pattern, &bitset);
+        auto sink = TantivyHitSink::Dense(bitset);
+        this->wrapper_->json_regex_query(json_path_, pattern, &sink);
         return bitset;
     }
 
@@ -232,7 +300,7 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
 
     void
     create_reader(SetBitsetFn set_bitset) {
-        this->wrapper_->create_reader(set_bitset);
+        this->wrapper_->create_reader(ToTantivyHitSinkCallback(set_bitset));
     }
 
  private:
