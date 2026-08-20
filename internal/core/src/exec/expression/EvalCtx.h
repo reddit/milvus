@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "common/Vector.h"
+#include "common/BitmapVector.h"
 #include "exec/QueryContext.h"
 
 namespace milvus {
@@ -71,17 +71,22 @@ class EvalCtx {
 
     inline void
     set_bitmap_input(TargetBitmap&& bitmap_input) {
+        bitmap_input_ = Bitmap(std::move(bitmap_input));
+    }
+
+    inline void
+    set_bitmap_input(Bitmap&& bitmap_input) {
         bitmap_input_ = std::move(bitmap_input);
     }
 
-    inline const TargetBitmap&
+    inline const Bitmap&
     get_bitmap_input() const {
         return bitmap_input_;
     }
 
     void
     clear_bitmap_input() {
-        bitmap_input_.clear();
+        bitmap_input_ = Bitmap();
     }
 
  private:
@@ -92,7 +97,7 @@ class EvalCtx {
     bool input_no_nulls_ = false;
 
     // used for expr pre filter, that avoid unnecessary execution on filtered data
-    TargetBitmap bitmap_input_;
+    Bitmap bitmap_input_;
 };
 
 }  // namespace exec

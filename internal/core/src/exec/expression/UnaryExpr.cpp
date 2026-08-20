@@ -316,7 +316,9 @@ template <typename ValueType>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
+    // Legacy element evaluators in this branch still require dense input.
+    // Densify only at this compatibility boundary.
+    const auto bitmap_input = context.get_bitmap_input().to_dense();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1390,7 +1392,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     }
     auto op_type = expr_->op_type_;
     auto execute_sub_batch = [op_type](Index* index_ptr, IndexInnerType val) {
-        TargetBitmap res;
+        Bitmap res;
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryIndexFunc<T, proto::plan::GreaterThan> func;
@@ -1531,7 +1533,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
+    const auto bitmap_input = context.get_bitmap_input().to_dense();
 
     if (auto res = PreCheckOverflow<T>(input)) {
         return res;

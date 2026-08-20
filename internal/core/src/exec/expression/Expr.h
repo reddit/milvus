@@ -1072,32 +1072,39 @@ class SegmentExpr : public Expr {
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
         using Index = index::ScalarIndex<IndexInnerType>;
-        TargetBitmap result;
-        TargetBitmap valid_result;
+        Bitmap result;
+        Bitmap valid_result;
         int processed_rows = 0;
 
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
             // This cache result help getting result for every batch loop.
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
-            if (cached_index_chunk_id_ != i) {
+            if (cached_bitmap_index_chunk_id_ != i) {
                 auto index_result = GetIndexPtrForChunk<IndexInnerType>(i);
                 Index* index_ptr = index_result.index_ptr;
 
-                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(func(index_ptr, values...)));
-                auto valid_result = index_ptr->IsNotNull();
-                cached_index_chunk_valid_res_ =
-                    std::make_shared<TargetBitmap>(std::move(valid_result));
-                cached_index_chunk_id_ = i;
+                auto index_bitmap = func(index_ptr, values...);
+                cached_bitmap_index_chunk_res_ =
+                    std::make_shared<Bitmap>(std::move(index_bitmap));
+                cached_bitmap_index_chunk_valid_res_ =
+                    std::make_shared<Bitmap>(index_ptr->IsNotNullBitmap());
+                cached_bitmap_index_chunk_id_ = i;
             }
 
-            auto size = ProcessIndexOneChunk(result,
-                                             valid_result,
-                                             i,
-                                             *cached_index_chunk_res_,
-                                             *cached_index_chunk_valid_res_,
-                                             processed_rows);
+            const auto data_pos =
+                i == current_index_chunk_ ? current_index_chunk_pos_ : 0;
+            Assert(data_pos <= cached_bitmap_index_chunk_res_->size());
+            const auto available = static_cast<int64_t>(
+                cached_bitmap_index_chunk_res_->size() - data_pos);
+            const auto size = std::min(
+                {size_per_chunk_ - data_pos,
+                 batch_size_ - static_cast<int64_t>(processed_rows),
+                 available});
+            result.append(
+                cached_bitmap_index_chunk_res_->slice(data_pos, size));
+            valid_result.append(
+                cached_bitmap_index_chunk_valid_res_->slice(data_pos, size));
 
             if (processed_rows + size >= batch_size_) {
                 current_index_chunk_ = i;
@@ -1109,7 +1116,7 @@ class SegmentExpr : public Expr {
             processed_rows += size;
         }
 
-        return std::make_shared<ColumnVector>(std::move(result),
+        return std::make_shared<BitmapVector>(std::move(result),
                                               std::move(valid_result));
     }
 
@@ -1589,6 +1596,9 @@ class SegmentExpr : public Expr {
     std::shared_ptr<TargetBitmap> cached_index_chunk_res_{nullptr};
     // Cache for chunk valid res.
     std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};
+    int64_t cached_bitmap_index_chunk_id_{-1};
+    std::shared_ptr<Bitmap> cached_bitmap_index_chunk_res_{nullptr};
+    std::shared_ptr<Bitmap> cached_bitmap_index_chunk_valid_res_{nullptr};
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};

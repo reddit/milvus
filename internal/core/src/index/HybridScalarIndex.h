@@ -143,6 +143,15 @@ class HybridScalarIndex : public ScalarIndex<T> {
             lower_bound_value, lb_inclusive, upper_bound_value, ub_inclusive);
     }
 
+    Bitmap
+    RangeBitmap(const T& lower_bound_value,
+                bool lb_inclusive,
+                const T& upper_bound_value,
+                bool ub_inclusive) override {
+        return internal_index_->RangeBitmap(
+            lower_bound_value, lb_inclusive, upper_bound_value, ub_inclusive);
+    }
+
     std::optional<T>
     Reverse_Lookup(size_t offset) const override {
         return internal_index_->Reverse_Lookup(offset);

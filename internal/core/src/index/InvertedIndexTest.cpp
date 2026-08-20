@@ -237,6 +237,10 @@ test_run() {
                 }
                 auto bitset =
                     real_index->In(test_data.size(), test_data.data());
+                auto bitmap_result =
+                    real_index->InBitmap(test_data.size(), test_data.data())
+                        .to_dense();
+                EXPECT_TRUE(bitmap_result == bitset);
                 ASSERT_EQ(cnt, bitset.size());
                 size_t start = 0;
                 if (has_lack_binlog_row_) {
@@ -269,6 +273,10 @@ test_run() {
                 }
                 auto bitset =
                     real_index->NotIn(test_data.size(), test_data.data());
+                auto bitmap_result =
+                    real_index->NotInBitmap(test_data.size(), test_data.data())
+                        .to_dense();
+                EXPECT_TRUE(bitmap_result == bitset);
                 ASSERT_EQ(cnt, bitset.size());
                 size_t start = 0;
                 if (has_lack_binlog_row_) {
@@ -374,6 +382,9 @@ test_run() {
                 for (const auto& [test_value, op, ref, default_value_res] :
                      test_cases) {
                     auto bitset = real_index->Range(test_value, op);
+                    auto bitmap_result =
+                        real_index->RangeBitmap(test_value, op).to_dense();
+                    EXPECT_TRUE(bitmap_result == bitset);
                     ASSERT_EQ(cnt, bitset.size());
                     size_t start = 0;
                     if (has_lack_binlog_row_) {
@@ -452,6 +463,12 @@ test_run() {
                                   default_value_res] : test_cases) {
                     auto bitset =
                         real_index->Range(lb, lb_inclusive, ub, ub_inclusive);
+                    auto bitmap_result =
+                        real_index
+                            ->RangeBitmap(
+                                lb, lb_inclusive, ub, ub_inclusive)
+                            .to_dense();
+                    EXPECT_TRUE(bitmap_result == bitset);
                     ASSERT_EQ(cnt, bitset.size());
                     size_t start = 0;
                     if (has_lack_binlog_row_) {

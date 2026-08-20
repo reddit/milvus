@@ -20,6 +20,7 @@
 #include "query/Utils.h"
 #include "segcore/SegmentGrowing.h"
 #include "common/Json.h"
+#include "common/BitmapVector.h"
 #include "log/Log.h"
 #include "plan/PlanNode.h"
 #include "exec/Task.h"
@@ -74,6 +75,12 @@ ExecPlanNodeVisitor::ExecuteTask(
             if (collect_bitset) {
                 BitsetTypeView view(vec->GetRawData(), vec->size());
                 bitset_holder.append(view);
+            }
+        } else if (auto vec =
+                       std::dynamic_pointer_cast<BitmapVector>(childrens[0])) {
+            processed_num += vec->size();
+            if (collect_bitset) {
+                bitset_holder.append(vec->result().to_dense());
             }
         } else {
             ThrowInfo(UnexpectedError, "expr return type not matched");

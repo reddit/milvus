@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <type_traits>
+#include "../../cmake/macos_xsimd_compat.hxx"
 #include <xsimd/xsimd.hpp>
 
 namespace milvus {

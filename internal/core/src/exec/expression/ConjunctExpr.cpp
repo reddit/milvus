@@ -38,28 +38,27 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
 }
 
 int64_t
-PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
+PhyConjunctFilterExpr::UpdateResult(BitmapVectorPtr& input_result,
                                     EvalCtx& ctx,
-                                    ColumnVectorPtr& result) {
+                                    BitmapVectorPtr& result) {
     if (is_and_) {
-        common::ThreeValuedLogicOp::And(result, input_result);
+        result->And(*input_result);
     } else {
-        common::ThreeValuedLogicOp::Or(result, input_result);
+        result->Or(*input_result);
     }
 
     // Return the count of active rows for short-circuit optimization
     // For AND: return count of true (if 0, all false, can skip)
     // For OR: return count of false (if 0, all true, can skip)
-    TargetBitmapView res_data(result->GetRawData(), result->size());
     if (is_and_) {
-        return static_cast<int64_t>(res_data.count());
+        return static_cast<int64_t>(result->count());
     } else {
-        return static_cast<int64_t>(result->size() - res_data.count());
+        return static_cast<int64_t>(result->size() - result->count());
     }
 }
 
 bool
-PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
+PhyConjunctFilterExpr::CanSkipFollowingExprs(BitmapVectorPtr& vec) {
     // For AND: can only skip if ALL rows are definitely FALSE (valid=1, data=0)
     //   - If any row is TRUE, we need to continue to determine final result
     //   - If any row is NULL, we need to continue because NULL AND FALSE = FALSE
@@ -95,8 +94,8 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         VectorPtr input_result;
         inputs_[input_order_[i]]->Eval(context, input_result);
         if (i == 0) {
-            result = input_result;
-            auto all_flat_result = GetColumnVector(result);
+            auto all_flat_result = GetBitmapVector(input_result);
+            result = all_flat_result;
             if (CanSkipFollowingExprs(all_flat_result)) {
                 SkipFollowingExprs(i + 1);
                 ClearBitmapInput(context);
@@ -105,8 +104,8 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             SetNextExprBitmapInput(all_flat_result, context);
             continue;
         }
-        auto input_flat_result = GetColumnVector(input_result);
-        auto all_flat_result = GetColumnVector(result);
+        auto input_flat_result = GetBitmapVector(input_result);
+        auto all_flat_result = GetBitmapVector(result);
         auto active_rows =
             UpdateResult(input_flat_result, context, all_flat_result);
         if (active_rows == 0) {
