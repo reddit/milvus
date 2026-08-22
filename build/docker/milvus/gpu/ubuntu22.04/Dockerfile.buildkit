@@ -28,6 +28,20 @@ SHELL ["/bin/bash", "-c"]
 
 WORKDIR /workspace/milvus
 
+# This ref requires Conan 1.x (see scripts/3rdparty_build.sh), but the upstream
+# GPU milvus-env defaults to Conan 2.x. Provision a 1.x binary as `conan-1` in an
+# isolated venv and select it via CONAN_CMD, independent of the base image's conan.
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-venv; \
+    rm -rf /var/lib/apt/lists/*; \
+    python3 -m venv /opt/conan1; \
+    /opt/conan1/bin/pip install --no-cache-dir --upgrade pip setuptools wheel; \
+    /opt/conan1/bin/pip install --no-cache-dir "conan==1.66.0"; \
+    ln -sf /opt/conan1/bin/conan /usr/local/bin/conan-1; \
+    conan-1 --version
+ENV CONAN_CMD=conan-1
+
 COPY . .
 
 ENV TARGETARCH=${TARGETARCH}
