@@ -14,10 +14,12 @@
 # core from scratch each time.
 
 ARG TARGETARCH
-# GPU builder toolchain (upstream). Tag mirrors GPU_DATE_VERSION in .env at the
-# v2.6.18-bf1d05bbef ref (Conan 1.x toolchain). Newer gpu-env tags ship Conan 2.x,
-# which this branch rejects during build-3rdparty.
-ARG MILVUS_ENV_IMAGE=milvusdb/milvus-env:gpu-ubuntu22.04-20260318-39568a2
+# GPU builder toolchain (upstream). Must be CUDA 12: Milvus 2.6's GPU index path
+# (Knowhere on cuVS/RAFT) requires CUDA 12, and it must match the CUDA 12 runtime
+# base below. The ref's own .env pins the older 20260318 tag, but that is CUDA 11.8
+# (GPU CMake configure fails). This CUDA 12 tag defaults to Conan 2.x, which the
+# builder stage overrides to Conan 1.x via CONAN_CMD below.
+ARG MILVUS_ENV_IMAGE=milvusdb/milvus-env:gpu-ubuntu22.04-20260610-5cdf891
 
 FROM ${MILVUS_ENV_IMAGE} AS builder
 
