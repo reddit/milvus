@@ -52,6 +52,21 @@ FetchContent_GetProperties( knowhere )
 if ( NOT knowhere_POPULATED )
     FetchContent_Populate( knowhere )
 
+    # Narrow the CUDA architectures knowhere/cuVS compile for. Upstream forces
+    # CMAKE_CUDA_ARCHITECTURES=RAPIDS (every supported arch), which makes a GPU
+    # build take >1h and exceed CI wall-clock limits. When MILVUS_KNOWHERE_CUDA_ARCH
+    # is set (e.g. "89-real" for the NVIDIA L4), rewrite the populated source so
+    # only that arch is built. Left unset, the upstream RAPIDS default is preserved.
+    if ( DEFINED MILVUS_KNOWHERE_CUDA_ARCH AND NOT MILVUS_KNOWHERE_CUDA_ARCH STREQUAL "" )
+        set( _kw_cmakelists "${knowhere_SOURCE_DIR}/CMakeLists.txt" )
+        file( READ "${_kw_cmakelists}" _kw_contents )
+        string( REPLACE "set(CMAKE_CUDA_ARCHITECTURES RAPIDS)"
+                        "set(CMAKE_CUDA_ARCHITECTURES ${MILVUS_KNOWHERE_CUDA_ARCH})"
+                        _kw_contents "${_kw_contents}" )
+        file( WRITE "${_kw_cmakelists}" "${_kw_contents}" )
+        message( STATUS "knowhere CUDA arch pinned to: ${MILVUS_KNOWHERE_CUDA_ARCH}" )
+    endif()
+
     # Adding the following target:
     # knowhere
     add_subdirectory( ${knowhere_SOURCE_DIR}

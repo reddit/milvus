@@ -55,6 +55,12 @@ COPY . .
 ENV TARGETARCH=${TARGETARCH}
 ENV GOARCH=${TARGETARCH}
 
+# Pin the GPU compile to the NVIDIA L4 arch (sm_89) only. Upstream knowhere/cuVS
+# defaults to CMAKE_CUDA_ARCHITECTURES=RAPIDS (all archs), which pushes the build
+# past the 1h CI wall-clock limit. core_build.sh forwards CMAKE_EXTRA_ARGS into the
+# core CMake configure, where internal/core/thirdparty/knowhere consumes this.
+ENV CMAKE_EXTRA_ARGS="-DMILVUS_KNOWHERE_CUDA_ARCH=89-real"
+
 # GPU build: build-cpp-gpu (core_build.sh -g) + go build with the `cuda` tag,
 # then install the binary and shared libs into ./bin and ./lib.
 RUN make gpu-install
