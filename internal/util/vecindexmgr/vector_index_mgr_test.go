@@ -230,3 +230,22 @@ func Test_VecIndex_IsMvSupported(t *testing.T) {
 		}
 	}
 }
+
+func Test_advertiseGPUIndexes(t *testing.T) {
+	features := map[string]uint64{"HNSW": Float32Flag}
+	injected := advertiseGPUIndexes(features)
+	if _, ok := injected["GPU_CAGRA"]; !ok {
+		t.Fatal("expected GPU_CAGRA to be advertised on a CPU feature set")
+	}
+	if _, ok := features["GPU_CAGRA"]; !ok {
+		t.Fatal("expected GPU_CAGRA in features")
+	}
+	if features["HNSW"] != Float32Flag {
+		t.Fatalf("HNSW feature mutated: %d", features["HNSW"])
+	}
+
+	injected = advertiseGPUIndexes(features)
+	if len(injected) != 0 {
+		t.Fatalf("second advertise should be a no-op, got %v", injected)
+	}
+}

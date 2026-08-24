@@ -136,3 +136,23 @@ func TestVecIndexChecker_SetDefaultMetricTypeIfNotExist(t *testing.T) {
 		})
 	}
 }
+
+func Test_checkAdvertisedGPUCagraParams(t *testing.T) {
+	assert.NoError(t, checkAdvertisedGPUCagraParams(map[string]string{
+		Metric:         "L2",
+		CagraBuildAlgo: CagraBuildAlgoIVFPQ,
+	}))
+	assert.Error(t, checkAdvertisedGPUCagraParams(map[string]string{
+		CagraBuildAlgo: "HNSW",
+	}))
+	assert.Error(t, checkAdvertisedGPUCagraParams(map[string]string{
+		RaftCacheDatasetOnDevice: "False",
+	}))
+	assert.Error(t, checkAdvertisedGPUCagraParams(map[string]string{
+		CagraInterDegree: "60",
+		CagraGraphDegree: "64",
+	}))
+	assert.Error(t, checkAdvertisedGPUCagraParams(map[string]string{
+		CagraInterDegree: "abc",
+	}))
+}

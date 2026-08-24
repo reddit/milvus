@@ -11,6 +11,7 @@ import "C"
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -22,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -72,6 +74,17 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType sch
 
 	if !vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) {
 		return fmt.Errorf("indexType %s is not supported", indexType)
+	}
+
+	if vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(indexType) ||
+		vecindexmgr.GetVecIndexMgrInstance().IsCPUAdvertisedGPUIndex(indexType) {
+		if !CheckStrByValues(params, Metric, RaftMetrics) {
+			return fmt.Errorf("metric type %s not found or not supported for GPU index, supported: %v", params[Metric], RaftMetrics)
+		}
+	}
+
+	if vecindexmgr.GetVecIndexMgrInstance().IsCPUAdvertisedGPUIndex(indexType) {
+		return checkAdvertisedGPUIndexParams(indexType, params)
 	}
 
 	protoIndexParams := &indexcgopb.IndexParams{
@@ -128,4 +141,53 @@ func (c vecIndexChecker) SetDefaultMetricTypeIfNotExist(dType schemapb.DataType,
 
 func newVecIndexChecker() IndexChecker {
 	return &vecIndexChecker{}
+}
+
+// checkAdvertisedGPUIndexParams validates GPU index params in Go when Knowhere
+// on this binary cannot ConfigCheck them (CPU build).
+func checkAdvertisedGPUIndexParams(indexType IndexType, params map[string]string) error {
+	switch indexType {
+	case "GPU_CAGRA":
+		return checkAdvertisedGPUCagraParams(params)
+	default:
+		return nil
+	}
+}
+
+func checkAdvertisedGPUCagraParams(params map[string]string) error {
+	if algo, ok := params[CagraBuildAlgo]; ok {
+		if !funcutil.SliceContain(CagraBuildAlgoTypes, algo) {
+			return fmt.Errorf("invalid %s: %s, expected one of %v", CagraBuildAlgo, algo, CagraBuildAlgoTypes)
+		}
+	}
+	if cache, ok := params[RaftCacheDatasetOnDevice]; ok {
+		if cache != "true" && cache != "false" {
+			return fmt.Errorf("invalid %s: %s, expected true or false", RaftCacheDatasetOnDevice, cache)
+		}
+	}
+
+	inter, interSet, err := optionalIntParam(params, CagraInterDegree)
+	if err != nil {
+		return err
+	}
+	graph, graphSet, err := optionalIntParam(params, CagraGraphDegree)
+	if err != nil {
+		return err
+	}
+	if interSet && graphSet && graph >= inter {
+		return fmt.Errorf("%s (%d) must be smaller than %s (%d)", CagraGraphDegree, graph, CagraInterDegree, inter)
+	}
+	return nil
+}
+
+func optionalIntParam(params map[string]string, key string) (int, bool, error) {
+	valueStr, ok := params[key]
+	if !ok {
+		return 0, false, nil
+	}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		return 0, true, fmt.Errorf("invalid %s: %s", key, valueStr)
+	}
+	return value, true, nil
 }

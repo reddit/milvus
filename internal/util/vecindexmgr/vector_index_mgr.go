@@ -61,6 +61,17 @@ const (
 
 type IndexType = string
 
+// cpuAdvertisedGPUIndexes are GPU index types coordinators must accept even
+// when this binary was built without CUDA. CreateIndex is validated on
+// mixcoord/proxy; the actual build still runs on a GPU DataNode. Types already
+// present in Knowhere (GPU builds) are left unchanged.
+//
+// GPU_CAGRA is advertised as a float32 vector index but *not* tagged GpuFlag so
+// CPU QueryNodes still take the CPU load path (adapt_for_cpu).
+var cpuAdvertisedGPUIndexes = map[string]uint64{
+	"GPU_CAGRA": Float32Flag,
+}
+
 type VecIndexMgr interface {
 	init()
 
@@ -82,11 +93,15 @@ type VecIndexMgr interface {
 	IsDiskVecIndex(indexType IndexType) bool
 	IsMMapSupported(indexType IndexType) bool
 	IsMvSupported(indexType IndexType) bool
+	// IsCPUAdvertisedGPUIndex is true when indexType was injected because this
+	// binary's Knowhere does not ship GPU indexes (CPU build).
+	IsCPUAdvertisedGPUIndex(indexType IndexType) bool
 }
 
 type vecIndexMgrImpl struct {
-	features map[string]uint64
-	once     sync.Once
+	features             map[string]uint64
+	cpuAdvertisedIndexes map[string]struct{}
+	once                 sync.Once
 }
 
 func (mgr *vecIndexMgrImpl) GetFeature(indexType IndexType) (uint64, bool) {
@@ -111,15 +126,16 @@ func (mgr *vecIndexMgrImpl) IsDiskANN(indexType IndexType) bool {
 
 func (mgr *vecIndexMgrImpl) init() {
 	size := int(C.GetIndexListSize())
+	mgr.features = make(map[string]uint64)
 	if size == 0 {
 		log.Error("get empty vector index features from vector index engine")
+		mgr.advertiseGPUIndexes()
 		return
 	}
 	vecIndexList := make([]unsafe.Pointer, size)
 	vecIndexFeatures := make([]uint64, size)
 
 	C.GetIndexFeatures(unsafe.Pointer(&vecIndexList[0]), (*C.uint64_t)(unsafe.Pointer(&vecIndexFeatures[0])))
-	mgr.features = make(map[string]uint64)
 	var featureLog bytes.Buffer
 	for i := 0; i < size; i++ {
 		key := C.GoString((*C.char)(vecIndexList[i]))
@@ -127,6 +143,34 @@ func (mgr *vecIndexMgrImpl) init() {
 		featureLog.WriteString(key + " : " + fmt.Sprintf("%d", vecIndexFeatures[i]) + ",")
 	}
 	log.Info("init vector indexes with features : " + featureLog.String())
+	mgr.advertiseGPUIndexes()
+}
+
+func advertiseGPUIndexes(features map[string]uint64) map[string]struct{} {
+	injected := make(map[string]struct{})
+	for name, feat := range cpuAdvertisedGPUIndexes {
+		if _, ok := features[name]; ok {
+			continue
+		}
+		features[name] = feat
+		injected[name] = struct{}{}
+	}
+	return injected
+}
+
+func (mgr *vecIndexMgrImpl) advertiseGPUIndexes() {
+	if mgr.features == nil {
+		mgr.features = make(map[string]uint64)
+	}
+	mgr.cpuAdvertisedIndexes = advertiseGPUIndexes(mgr.features)
+	if len(mgr.cpuAdvertisedIndexes) == 0 {
+		return
+	}
+	var advertised bytes.Buffer
+	for name := range mgr.cpuAdvertisedIndexes {
+		advertised.WriteString(name + ",")
+	}
+	log.Info("advertised GPU indexes missing from Knowhere (CPU build): " + advertised.String())
 }
 
 func (mgr *vecIndexMgrImpl) isVectorTypeSupported(indexType IndexType, vectorFlag uint64, isEmbeddingList bool) bool {
@@ -230,6 +274,11 @@ func (mgr *vecIndexMgrImpl) IsMMapSupported(indexType IndexType) bool {
 
 func (mgr *vecIndexMgrImpl) IsVecIndex(indexType IndexType) bool {
 	_, ok := mgr.GetFeature(indexType)
+	return ok
+}
+
+func (mgr *vecIndexMgrImpl) IsCPUAdvertisedGPUIndex(indexType IndexType) bool {
+	_, ok := mgr.cpuAdvertisedIndexes[indexType]
 	return ok
 }
 
