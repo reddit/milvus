@@ -1,21 +1,9 @@
 name: Publish Builder
 # TODO: do not trigger action for some document file update
 
-# This workflow is triggered on pushes or pull request to the repository.
+# Disabled in this fork; CI runs via internal pipelines.
 on:
-  push:
-    # file paths to consider in the event. Optional; defaults to all.
-    paths:
-      - 'build/docker/builder/cpu/**'
-      - '.github/workflows/publish-builder.yaml'
-      - '!**.md'
-  pull_request:
-    # file paths to consider in the event. Optional; defaults to all.
-    paths:
-      - 'build/docker/builder/cpu/**'
-      - '.github/workflows/publish-builder.yaml'
-      - '!**.md'
-
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -46,7 +34,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Get version from system time after release step
-        id: extracter
+        id: extractor
         run: |
           echo "::set-output name=version::$(date +%Y%m%d)"
           echo "::set-output name=sha_short::$(git rev-parse --short=7 HEAD)"
@@ -85,6 +73,6 @@ jobs:
         uses: ./.github/actions/bump-builder-version
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu22.04'
         with:
-          tag: "${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}"
+          tag: "${{ steps.extractor.outputs.version }}-${{ steps.extractor.outputs.sha_short }}"
           type: cpu
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}

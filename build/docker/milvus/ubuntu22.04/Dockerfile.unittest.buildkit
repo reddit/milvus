@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.7
+
+ARG TARGETARCH
+ARG MILVUS_ENV_IMAGE=artifactory.build.ue1.snooguts.net/reddit-docker-dev/milvusdb/milvus-env:ubuntu22.04-20251231-67e4a21
+
+FROM ${MILVUS_ENV_IMAGE}
+
+ARG TARGETARCH
+
+WORKDIR /workspace/milvus
+
+COPY . .
+
+ENV TARGETARCH=${TARGETARCH}
+ENV GOARCH=${TARGETARCH}
+
+# This image can use a Conan-warmed MILVUS_ENV_IMAGE built from Dockerfile.conan.
+RUN make unittest

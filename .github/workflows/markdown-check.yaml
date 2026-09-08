@@ -1,9 +1,7 @@
 name: Markdown Links Check
+# Disabled in this fork; CI runs via internal pipelines.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "30 20 * * *"
-
 jobs:
   check-links:
     runs-on: ubuntu-latest
